@@ -1,3 +1,4 @@
+import datetime
 import time
 import requests
 import pandas as pd
@@ -20,7 +21,7 @@ st.markdown("""
 <style>
     .stApp { background-color: #080c14; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     .block-container {
-        padding-top: 0.8rem !important;
+        padding-top: 0.6rem !important;
         padding-bottom: 2rem !important;
         padding-left: 0.6rem !important;
         padding-right: 0.6rem !important;
@@ -64,13 +65,12 @@ st.markdown("""
         padding: 12px;
         margin-bottom: 10px;
     }
-    .metric-subbox {
-        background: #090f1d;
-        border: 1px solid #182234;
-        border-radius: 6px;
-        padding: 8px;
-        text-align: center;
-        font-size: 0.78rem;
+    .sync-badge {
+        font-size: 0.70rem;
+        color: #64748b;
+        text-align: right;
+        margin-top: -12px;
+        margin-bottom: 8px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -151,7 +151,7 @@ def analyze_asset_complete(asset: dict):
         if np.isnan(atr) or atr <= 0:
             atr = curr_p * 0.015
 
-        # TTM Squeeze (Bollinger vs Keltner)
+        # TTM Squeeze
         sma20 = c.rolling(20).mean()
         std20 = c.rolling(20).std()
         bb_u, bb_l = sma20 + (2.0 * std20), sma20 - (2.0 * std20)
@@ -174,7 +174,7 @@ def analyze_asset_complete(asset: dict):
     elif 45 <= rsi_1h <= 62 and trend_bull: score += 12
     score = max(5, min(95, score))
 
-    # --- LOGICA LIVELLI COERENTE PER SEGNALE ---
+    # Definizione Livelli Coerenti per Condizione di Mercato
     if rsi_1h >= 75 or rsi_4h >= 80:
         action = "⚠️ PRENDI PROFITTO (IPERCOMPRATO)"
         action_code = "TP"
@@ -261,7 +261,7 @@ def fetch_fear_and_greed():
     except Exception:
         return 50, "Neutral"
 
-# --- SCARICAMENTO ASINCRONO VELOCE ---
+# --- SCARICAMENTO ASINCRONO ---
 @st.cache_data(ttl=15)
 def load_all_market_intelligence():
     with ThreadPoolExecutor(max_workers=8) as ex:
@@ -272,9 +272,12 @@ data_market = load_all_market_intelligence()
 fng_val, fng_label = fetch_fear_and_greed()
 avg_bias = int(np.mean([x["score"] for x in data_market])) if data_market else 50
 names_list = [d["name"] for d in data_market]
+now_str = datetime.datetime.now().strftime("%H:%M:%S")
 
-# --- HEADER STATS BAR ---
+# --- HEADER STATS BAR & TIMESTAMP ---
 st.markdown("### ⚡ Apex Terminal Pro")
+st.markdown(f"<div class='sync-badge'>Feed Sincronizzato OKX Core • Ultimo Aggiornamento: <b>{now_str}</b></div>", unsafe_allow_html=True)
+
 k1, k2, k3 = st.columns(3)
 k1.metric("Fear & Greed", f"{fng_val}/100", delta=fng_label, delta_color="off")
 k2.metric("Market Bias", f"{avg_bias}/100", delta="BULLISH" if avg_bias >= 50 else "BEARISH")
@@ -291,7 +294,7 @@ t_signals, t_heat, t_whales, t_calc, t_tv = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: SEGNALI & LIVELLI LOGICI
+# TAB 1: SEGNALI & MULTI-TIMEFRAME
 # ==========================================
 with t_signals:
     filter_choice = st.radio("Filtra per:", ["Tutti", "🟢 Solo Long", "⚠️ Solo TP/Short"], horizontal=True)
@@ -320,15 +323,13 @@ with t_signals:
         """, unsafe_allow_html=True)
 
         if item["squeeze"]:
-            st.warning(f"⚡ **TTM Squeeze Attivo su {item['name']}:** Compressione di volatilità 1H. Prepararsi al breakout.")
+            st.warning(f"⚡ **TTM Squeeze Attivo su {item['name']}:** Compressione di volatilità 1H. Atteso breakout forte.")
 
-        # Metric Multi-Timeframe RSI
         m1, m2, m3 = st.columns(3)
         m1.metric("RSI 1H", f"{item['rsi_1h']}")
         m2.metric("RSI 4H", f"{item['rsi_4h']}")
         m3.metric("RSI 1D", f"{item['rsi_1d']}")
 
-        # Livelli coerenti
         l1, l2, l3 = st.columns(3)
         l1.markdown(f"**{item['lvl1'][0]}:** `{fmt_price(item['lvl1'][1])}`")
         l2.markdown(f"**{item['lvl2'][0]}:** `{fmt_price(item['lvl2'][1])}`")
@@ -388,7 +389,6 @@ with t_heat:
     )
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-    # Tabella di riepilogo trigger per sfruttare lo spazio
     st.markdown("###### 📊 Trigger Target di Liquidazione")
     t_liq_summary = pd.DataFrame({
         "Leva": df_l["Leva"],
@@ -424,10 +424,10 @@ with t_whales:
         st.info(f"Nessun blocco > ${threshold:,} nelle ultime 100 esecuzioni su {w_coin}.")
 
 # ==========================================
-# TAB 4: RISK & POSITION CON MATRICE R:R
+# TAB 4: RISK & POSITION SIZING
 # ==========================================
 with t_calc:
-    st.markdown("##### 🎯 Calcolo Rischio e Dimensionamento Posizione")
+    st.markdown("##### 🎯 Dimensionamento Posizione & Gestione Rischio")
     calc_c = st.selectbox("Asset Operativo:", names_list, index=0, key="calc_select_c")
     calc_meta = next(d for d in data_market if d["name"] == calc_c)
 
@@ -455,7 +455,6 @@ with t_calc:
     r3.metric("Quantità Coin", f"{position_coins:,.4f} {calc_c}")
     r4.metric("Stop Loss ATR", fmt_price(stop_calc))
 
-    # Matrice Risk/Reward operativa
     st.markdown("###### 📋 Matrice Target Profit & Risk/Reward")
     rr_data = []
     for rr in [1.5, 2.0, 3.0, 4.0]:
@@ -469,14 +468,14 @@ with t_calc:
     st.dataframe(pd.DataFrame(rr_data), use_container_width=True, hide_index=True)
 
 # ==========================================
-# TAB 5: TRADINGVIEW LIVE CHART
+# TAB 5: TRADINGVIEW LIVE PRO
 # ==========================================
 with t_tv:
     tv_c = st.selectbox("Grafico Live:", names_list, index=0, key="tv_select")
     tv_meta = next(d for d in data_market if d["name"] == tv_c)
 
     tv_widget_html = f"""
-    <div style="height:460px;width:100%">
+    <div style="height:520px;width:100%">
       <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
       <script type="text/javascript">
       new TradingView.widget({{
@@ -490,7 +489,7 @@ with t_tv:
         "toolbar_bg": "#080c14",
         "enable_publishing": false,
         "hide_top_toolbar": false,
-        "hide_side_toolbar": true,
+        "hide_side_toolbar": false,
         "save_image": false,
         "container_id": "tv_chart"
       }});
@@ -498,4 +497,4 @@ with t_tv:
       <div id="tv_chart" style="height:100%;width:100%"></div>
     </div>
     """
-    components.html(tv_widget_html, height=470)
+    components.html(tv_widget_html, height=530)
