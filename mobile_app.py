@@ -62,16 +62,16 @@ def send_push_notification(title: str, message: str, priority: str = "high"):
         except Exception:
             pass
 
-# --- LISTA ASSET BINANCE (SPOT / PERP) ---
+# --- LISTA ASSET GLOBALI ---
 ASSETS = [
-    {"name": "BTC/USDT", "symbol": "BTCUSDT", "is_futures": False},
-    {"name": "ETH/USDT", "symbol": "ETHUSDT", "is_futures": False},
-    {"name": "SOL/USDT", "symbol": "SOLUSDT", "is_futures": False},
-    {"name": "TAO/USDT", "symbol": "TAOUSDT", "is_futures": False},
-    {"name": "ONDO/USDT", "symbol": "ONDOUSDT", "is_futures": False},
-    {"name": "HYPE/USDT", "symbol": "HYPEUSDT", "is_futures": True},
-    {"name": "WLD/USDT", "symbol": "WLDUSDT", "is_futures": False},
-    {"name": "ZEC/USDT", "symbol": "ZECUSDT", "is_futures": False}
+    {"name": "BTC/USD", "symbol": "BTC"},
+    {"name": "ETH/USD", "symbol": "ETH"},
+    {"name": "SOL/USD", "symbol": "SOL"},
+    {"name": "TAO/USD", "symbol": "TAO"},
+    {"name": "ONDO/USD", "symbol": "ONDO"},
+    {"name": "HYPE/USD", "symbol": "HYPE"},
+    {"name": "WLD/USD", "symbol": "WLD"},
+    {"name": "ZEC/USD", "symbol": "ZEC"}
 ]
 
 # --- CALCOLO INDICATORI QUANTITATIVI REALI ---
@@ -105,52 +105,51 @@ def compute_technical_indicators(df: pd.DataFrame):
     kc_upper = sma20 + (1.5 * atr20)
     kc_lower = sma20 - (1.5 * atr20)
 
-    # 4. John Carter Squeeze Check (BB dentro KC)
+    # 4. Squeeze Check (Bollinger all'interno di Keltner)
     squeeze_on = bool(bb_lower.iloc[-1] > kc_lower.iloc[-1] and bb_upper.iloc[-1] < kc_upper.iloc[-1])
 
-    # 5. Trend EMA
+    # 5. Trend EMA (7 vs 25)
     ema7 = closes.ewm(span=7, adjust=False).mean().iloc[-1]
     ema25 = closes.ewm(span=25, adjust=False).mean().iloc[-1]
     trend_bullish = ema7 > ema25
 
     return current_rsi, squeeze_on, trend_bullish
 
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=30)
 def fetch_real_quant_matrix():
     matrix = []
     
     for item in ASSETS:
-        symbol = item["symbol"]
-        base_url = "https://fapi.binance.com/fapi/v1" if item["is_futures"] else "https://api.binance.com/api/v3"
-        
+        sym = item["symbol"]
         try:
-            # Candele 1H reali (ultime 60 ore)
-            kline_res = requests.get(f"{base_url}/klines?symbol={symbol}&interval=1h&limit=60", timeout=3).json()
-            if not isinstance(kline_res, list) or len(kline_res) < 30:
+            # Candele orarie reali da CryptoCompare (compatibile con server USA / Cloud)
+            url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={sym}&tsym=USD&limit=50"
+            res = requests.get(url, timeout=4).json()
+            
+            data_list = res.get("Data", {}).get("Data", [])
+            if not data_list or len(data_list) < 25:
                 continue
 
-            df_k = pd.DataFrame(kline_res, columns=[
-                "open_time", "open", "high", "low", "close", "volume",
-                "close_time", "q_vol", "trades", "tb_base", "tb_quote", "ignore"
-            ])
-            df_k["high"] = df_k["high"].astype(float)
-            df_k["low"] = df_k["low"].astype(float)
-            df_k["close"] = df_k["close"].astype(float)
-            df_k["volume"] = df_k["volume"].astype(float)
+            df_k = pd.DataFrame(data_list)
+            df_k = df_k[["time", "open", "high", "low", "close", "volumeto"]].copy()
+            df_k = df_k[df_k["close"] > 0].reset_index(drop=True)
 
-            curr_price = df_k["close"].iloc[-1]
-            prev_24h_close = df_k["close"].iloc[-24] if len(df_k) >= 25 else df_k["close"].iloc[0]
+            if len(df_k) < 20:
+                continue
+
+            curr_price = float(df_k["close"].iloc[-1])
+            prev_24h_close = float(df_k["close"].iloc[-24]) if len(df_k) >= 25 else float(df_k["close"].iloc[0])
             pct_change_24h = ((curr_price - prev_24h_close) / prev_24h_close) * 100
 
             rsi, squeeze, trend_bull = compute_technical_indicators(df_k)
 
-            # Algoritmo Score Quantitativo
+            # Scoring quantitativo
             score = 50
-            if rsi < 35: score += 20      # Ipervenduto
-            elif rsi > 65: score -= 18    # Ipercomprato
-            if trend_bull: score += 12    # Trend EMA a favore
+            if rsi < 35: score += 20
+            elif rsi > 65: score -= 18
+            if trend_bull: score += 12
             else: score -= 12
-            if squeeze: score += 10       # Compressione pronta all'esplosione
+            if squeeze: score += 10
             
             score = max(5, min(95, score))
             bias = "BULLISH" if score >= 50 else "BEARISH"
@@ -166,12 +165,11 @@ def fetch_real_quant_matrix():
             else:
                 action = "💤 WAIT"
 
-            # Formattazione prezzo
             fmt_price = f"${curr_price:,.2f}" if curr_price >= 1 else f"${curr_price:.4f}"
 
             matrix.append({
                 "Asset": item["name"],
-                "symbol": symbol,
+                "symbol": sym,
                 "Price": fmt_price,
                 "raw_price": curr_price,
                 "24h %": f"{pct_change_24h:+.2f}%",
@@ -182,13 +180,12 @@ def fetch_real_quant_matrix():
                 "Action": action,
                 "df_k": df_k
             })
-
         except Exception:
             continue
 
     return matrix
 
-# --- ESECUZIONE FETCH ---
+# --- ESECUZIONE APP ---
 st.markdown("### 🛡️ Institutional Apex Quant")
 st.caption("⚡ Motore Algoritmico Live Feed | Dati OHLCV Reali")
 
@@ -196,7 +193,7 @@ matrix_data = fetch_real_quant_matrix()
 df_display = pd.DataFrame(matrix_data)
 
 if not df_display.empty:
-    # --- 1. GLOBAL MARKET SENTIMENT (GAUGE) ---
+    # 1. GAUGE SENTIMENT GLOBALE
     st.markdown("#### 🌐 Sentiment Quantitativo Globale")
     avg_score = int(df_display["Score"].mean())
     fig_gauge = go.Figure(go.Indicator(
@@ -215,7 +212,7 @@ if not df_display.empty:
     fig_gauge.update_layout(height=180, margin=dict(l=5, r=5, t=5, b=5), paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"})
     st.plotly_chart(fig_gauge, use_container_width=True)
 
-    # --- 2. CONFLUENCE TABLE MOBILE ---
+    # 2. TABELLA SEGNALI E CONFLUENZA
     st.markdown("#### 📊 Segnali & Confluenza di Mercato")
     st.dataframe(
         df_display[["Asset", "Price", "24h %", "RSI", "Squeeze", "Score", "Action"]],
@@ -223,11 +220,12 @@ if not df_display.empty:
         hide_index=True
     )
 
-    # --- 3. ANALISI TECNICA STRUTTURALE ---
+    # 3. GRAFICO CANDLESTICK REALE
     st.markdown("---")
-    st.markdown("#### 📈 Struttura Prezzo & Bande Reali")
+    st.markdown("#### 📈 Struttura Prezzo Oraria")
     
-    selected_name = st.selectbox("Seleziona Asset", [a["Asset"] for a in matrix_data], index=0)
+    asset_names = [a["Asset"] for a in matrix_data]
+    selected_name = st.selectbox("Seleziona Asset", asset_names, index=0)
     selected_row = next(item for item in matrix_data if item["Asset"] == selected_name)
     df_chart = selected_row["df_k"].tail(30)
 
@@ -250,24 +248,17 @@ if not df_display.empty:
     )
     st.plotly_chart(fig_candlestick, use_container_width=True)
 
-    # --- 4. DERIVATI & FUNDING RATE REALI ---
+    # 4. METRICHE VOLUMI E PREZZO
     st.markdown("---")
-    st.markdown("#### ⚡ Posizionamento Derivati (Futures)")
-    try:
-        btc_funding = requests.get("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT", timeout=2).json()
-        f_rate = float(btc_funding.get("lastFundingRate", 0)) * 100
-        mark_price = float(btc_funding.get("markPrice", 0))
-    except Exception:
-        f_rate = 0.01
-        mark_price = selected_row["raw_price"]
-
+    st.markdown("#### ⚡ Volatilità & Volumi")
+    vol_24h = df_chart["volumeto"].sum()
     m1, m2 = st.columns(2)
     with m1:
-        st.metric(label="BTC Funding Rate", value=f"{f_rate:+.4f}%", delta="Basso" if abs(f_rate) < 0.015 else "Surriscaldato")
+        st.metric(label="Volume 24h (USD)", value=f"${vol_24h:,.0f}")
     with m2:
-        st.metric(label=f"Mark Price {selected_name.split('/')[0]}", value=f"${mark_price:,.2f}" if mark_price > 1 else f"${mark_price:.4f}")
+        st.metric(label="RSI Attuale (1H)", value=f"{selected_row['RSI']}")
 
-    # --- 5. NOTIFICHE PUSH DISPATCH ---
+    # 5. DISPATCH NOTIFICHE PUSH
     st.markdown("---")
     if st.button("📲 Invia Notifiche Push"):
         alert_rows = df_display[df_display["Action"].str.contains("LONG|SHORT", regex=True)]
@@ -281,4 +272,4 @@ if not df_display.empty:
         else:
             st.info("Nessuna anomalia quantitativa rilevata al momento.")
 else:
-    st.warning("Caricamento dati di mercato in corso...")
+    st.error("Errore di connessione all'API dati. Ricarica la pagina.")
