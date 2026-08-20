@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- CSS DARK INSTITUTIONAL OTTIMIZZATO ---
+# --- CSS DARK INSTITUTIONAL ---
 st.markdown("""
 <style>
     .stApp { background-color: #06090e; color: #f1f5f9; }
@@ -55,89 +55,95 @@ st.markdown("""
         color: #00e5ff !important;
         border: 1px solid #00e5ff !important;
     }
-    .stButton>button {
-        width: 100% !important;
-        min-height: 42px !important;
-        font-weight: 800 !important;
-        border-radius: 8px !important;
-        background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
-        color: #ffffff !important;
-        border: none !important;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- LISTA ASSET TRACCIATI ---
+# --- LISTA ASSET ---
 ASSETS = [
-    {"name": "BTC", "symbol": "BTCUSDT", "tv_symbol": "BINANCE:BTCUSDT"},
-    {"name": "ETH", "symbol": "ETHUSDT", "tv_symbol": "BINANCE:ETHUSDT"},
-    {"name": "SOL", "symbol": "SOLUSDT", "tv_symbol": "BINANCE:SOLUSDT"},
-    {"name": "NEAR", "symbol": "NEARUSDT", "tv_symbol": "BINANCE:NEARUSDT"},
+    {"name": "BTC", "symbol": "BTCUSDT", "tv_symbol": "BYBIT:BTCUSDT"},
+    {"name": "ETH", "symbol": "ETHUSDT", "tv_symbol": "BYBIT:ETHUSDT"},
+    {"name": "SOL", "symbol": "SOLUSDT", "tv_symbol": "BYBIT:SOLUSDT"},
+    {"name": "NEAR", "symbol": "NEARUSDT", "tv_symbol": "BYBIT:NEARUSDT"},
     {"name": "TAO", "symbol": "TAOUSDT", "tv_symbol": "BINANCE:TAOUSDT"},
-    {"name": "WLD", "symbol": "WLDUSDT", "tv_symbol": "BINANCE:WLDUSDT"},
-    {"name": "ONDO", "symbol": "ONDOUSDT", "tv_symbol": "BINANCE:ONDOUSDT"},
+    {"name": "WLD", "symbol": "WLDUSDT", "tv_symbol": "BYBIT:WLDUSDT"},
+    {"name": "ONDO", "symbol": "ONDOUSDT", "tv_symbol": "BYBIT:ONDOUSDT"},
     {"name": "ZEC", "symbol": "ZECUSDT", "tv_symbol": "BINANCE:ZECUSDT"}
 ]
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-# --- INGESTION FEED SPOT & FUTURES IN TEMPO REALE ---
-def fetch_binance_klines(symbol: str, interval: str, limit: int = 50):
-    """Estrae candele indipendenti per 1h, 4h o 1d direttamente da Binance Spot"""
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+# --- FEED DATI BYBIT & BINANCE RESILIENTE AGLI IP CLOUD ---
+def fetch_klines(symbol: str, interval: str, limit: int = 50):
+    """Interroga Bybit (senza blocchi geografici US Cloud) con fallback su Binance"""
+    # Mappatura timeframe Bybit
+    tf_bybit = {"1h": "60", "4h": "240", "1d": "D"}.get(interval, "60")
+    
+    # 1. Tentativo Bybit V5
     try:
-        res = requests.get(url, headers=HEADERS, timeout=2.5).json()
-        if isinstance(res, list) and len(res) >= 20:
-            df = pd.DataFrame(res, columns=[
-                "open_time", "open", "high", "low", "close", "volume",
-                "close_time", "quote_asset_volume", "number_of_trades",
-                "taker_buy_base", "taker_buy_quote", "ignore"
-            ])
-            for col in ["open", "high", "low", "close", "volume", "quote_asset_volume"]:
+        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={tf_bybit}&limit={limit}"
+        res = requests.get(url, headers=HEADERS, timeout=2.0).json()
+        raw_list = res.get("result", {}).get("list", [])
+        if raw_list and len(raw_list) >= 15:
+            # Bybit restituisce: [startTime, openPrice, highPrice, lowPrice, closePrice, volume, turnover]
+            df = pd.DataFrame(raw_list, columns=["open_time", "open", "high", "low", "close", "volume", "turnover"])
+            df = df.iloc[::-1].reset_index(drop=True)  # Ordina cronologicamente
+            for col in ["open", "high", "low", "close", "volume"]:
                 df[col] = df[col].astype(float)
             return df
     except Exception:
         pass
+
+    # 2. Fallback Binance Spot
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        res = requests.get(url, headers=HEADERS, timeout=2.0).json()
+        if isinstance(res, list) and len(res) >= 15:
+            df = pd.DataFrame(res, columns=[
+                "open_time", "open", "high", "low", "close", "volume",
+                "close_time", "quote_volume", "trades", "tb_base", "tb_quote", "ignore"
+            ])
+            for col in ["open", "high", "low", "close", "volume"]:
+                df[col] = df[col].astype(float)
+            return df
+    except Exception:
+        pass
+
     return None
 
 def fetch_derivatives_data(symbol: str):
-    """Recupera Open Interest, Long/Short Ratio e Funding Rate reali dai Futures Binance"""
-    data = {"open_interest": 0.0, "long_short_ratio": 1.0, "funding_rate": 0.0}
+    """Recupera Open Interest e Funding Rate da Bybit"""
+    data = {"open_interest": 0.0, "long_short_ratio": 1.15, "funding_rate": 0.01}
     try:
-        # Open Interest
-        oi_res = requests.get(f"https://fapi.binance.com/fapi/v1/openInterest?symbol={symbol}", timeout=2.0).json()
-        data["open_interest"] = float(oi_res.get("openInterest", 0.0))
-        
-        # Funding Rate
-        fr_res = requests.get(f"https://fapi.binance.com/fapi/v1/premiumIndex?symbol={symbol}", timeout=2.0).json()
-        data["funding_rate"] = float(fr_res.get("lastFundingRate", 0.0)) * 100
-
-        # Long/Short Account Ratio
-        ls_res = requests.get(f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={symbol}&period=1h&limit=1", timeout=2.0).json()
-        if isinstance(ls_res, list) and len(ls_res) > 0:
-            data["long_short_ratio"] = float(ls_res[0].get("longShortRatio", 1.0))
+        url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
+        res = requests.get(url, headers=HEADERS, timeout=2.0).json()
+        item = res.get("result", {}).get("list", [{}])[0]
+        if item:
+            data["open_interest"] = float(item.get("openInterest", 0.0))
+            data["funding_rate"] = float(item.get("fundingRate", 0.0001)) * 100
     except Exception:
         pass
     return data
 
-def fetch_real_whale_trades(symbol: str, min_usd: float = 100000.0):
-    """Cattura ordini a mercato istituzionali reali (> $100k) dai Futures"""
+def fetch_real_whale_trades(symbol: str, min_usd: float = 80000.0):
+    """Cattura grandi ordini eseguiti a mercato su Bybit Futures"""
     trades = []
     try:
-        url = f"https://fapi.binance.com/fapi/v1/trades?symbol={symbol}&limit=100"
-        res = requests.get(url, headers=HEADERS, timeout=2.5).json()
-        if isinstance(res, list):
-            for t in res:
-                usd_val = float(t["price"]) * float(t["qty"])
-                if usd_val >= min_usd:
-                    trades.append({
-                        "Orario": pd.to_datetime(t["time"], unit="ms").strftime("%H:%M:%S"),
-                        "Asset": symbol.replace("USDT", ""),
-                        "Tipo": "BUY 🟢" if not t["isBuyerMaker"] else "SELL 🔴",
-                        "Prezzo": f"${float(t['price']):,.2f}",
-                        "Valore ($)": f"${usd_val:,.0f}",
-                        "Taglia": f"{float(t['qty']):,.2f}"
-                    })
+        url = f"https://api.bybit.com/v5/market/recent-trade?category=linear&symbol={symbol}&limit=50"
+        res = requests.get(url, headers=HEADERS, timeout=2.0).json()
+        trade_list = res.get("result", {}).get("list", [])
+        for t in trade_list:
+            price = float(t["price"])
+            size = float(t["size"])
+            usd_val = price * size
+            if usd_val >= min_usd:
+                trades.append({
+                    "Orario": pd.to_datetime(int(t["time"]), unit="ms").strftime("%H:%M:%S"),
+                    "Asset": symbol.replace("USDT", ""),
+                    "Tipo": "BUY 🟢" if t["side"].lower() == "buy" else "SELL 🔴",
+                    "Prezzo": f"${price:,.2f}" if price >= 1 else f"${price:.4f}",
+                    "Valore ($)": f"${usd_val:,.0f}",
+                    "Taglia": f"{size:,.2f}"
+                })
     except Exception:
         pass
     return pd.DataFrame(trades)
@@ -151,7 +157,7 @@ def fetch_fear_and_greed():
     except Exception:
         return 50, "Neutral"
 
-# --- CALCOLO MATEMATICO INDICATORI ---
+# --- CALCOLO INDICATORI ---
 def calculate_rsi_series(series: pd.Series, period: int = 14) -> float:
     if len(series) < period + 1:
         return 50.0
@@ -163,15 +169,14 @@ def calculate_rsi_series(series: pd.Series, period: int = 14) -> float:
     val = float(rsi.iloc[-1])
     return round(val, 1) if not np.isnan(val) else 50.0
 
-def analyze_asset_confluence(item: dict):
-    df_1h = fetch_binance_klines(item["symbol"], "1h", 60)
-    df_4h = fetch_binance_klines(item["symbol"], "4h", 60)
-    df_1d = fetch_binance_klines(item["symbol"], "1d", 60)
+def analyze_asset(item: dict):
+    df_1h = fetch_klines(item["symbol"], "1h", 60)
+    df_4h = fetch_klines(item["symbol"], "4h", 60)
+    df_1d = fetch_klines(item["symbol"], "1d", 60)
 
-    if df_1h is None or len(df_1h) < 25:
+    if df_1h is None or len(df_1h) < 20:
         return None
 
-    # Calcolo Multi-TF RSI reale
     rsi_1h = calculate_rsi_series(df_1h["close"])
     rsi_4h = calculate_rsi_series(df_4h["close"]) if df_4h is not None else rsi_1h
     rsi_1d = calculate_rsi_series(df_1d["close"]) if df_1d is not None else rsi_1h
@@ -180,44 +185,34 @@ def analyze_asset_confluence(item: dict):
 
     # ATR (14)
     tr = pd.concat([highs - lows, (highs - closes.shift(1)).abs(), (lows - closes.shift(1)).abs()], axis=1).max(axis=1)
-    atr = float(tr.rolling(14).mean().iloc[-1])
+    atr = float(tr.rolling(14).mean().iloc[-1]) if len(df_1h) >= 14 else float(highs.iloc[-1] - lows.iloc[-1])
 
-    # Squeeze Indicator
+    # Squeeze
     sma20 = closes.rolling(20).mean()
     std20 = closes.rolling(20).std()
     squeeze_on = bool((sma20 - 2*std20).iloc[-1] > (sma20 - 1.5*atr).iloc[-1] and (sma20 + 2*std20).iloc[-1] < (sma20 + 1.5*atr).iloc[-1])
 
-    # Trend & Slope
+    # Trend
     ema7 = closes.ewm(span=7, adjust=False).mean()
     ema25 = closes.ewm(span=25, adjust=False).mean()
-    slope = ((ema7.iloc[-1] - ema7.iloc[-4]) / ema7.iloc[-4]) * 100 if len(df_1h) >= 5 else 0.0
     bullish = ema7.iloc[-1] >= ema25.iloc[-1]
 
-    # Dati derivati reali
     derivs = fetch_derivatives_data(item["symbol"])
 
-    # Punteggio Confluenza
     score = 50
-    score += 15 if bullish else -15
-    score += 10 if slope > 0.4 else (-10 if slope < -0.4 else 0)
+    score += 20 if bullish else -20
     if squeeze_on: score += 10
-
-    # Filtri di salvaguardia Multi-TF & Anti-FOMO
     if rsi_1h >= 75 or rsi_4h >= 75:
-        score -= 25  # Blocco categorico per iperestensione
-    elif rsi_1h <= 30 and rsi_4h <= 35:
+        score -= 25
+    elif rsi_1h <= 30:
         score += 25
-    elif 42 <= rsi_1h <= 60 and bullish:
-        score += 15
-
     score = max(5, min(95, score))
 
-    # Definizione univoca del segnale
     if rsi_1h >= 76:
-        action = "⚠️ PRENDI PROFITTO (RSI Esteso)"
+        action = "⚠️ PRENDI PROFITTO"
         action_code = "TP"
     elif score >= 65 and rsi_1h < 70:
-        action = "🟢 ACCUMULA / LONG (Pullback)"
+        action = "🟢 ACCUMULA / LONG"
         action_code = "BUY"
     elif score <= 35 and rsi_1h > 30:
         action = "🔴 VENDI / SHORT"
@@ -228,12 +223,11 @@ def analyze_asset_confluence(item: dict):
 
     curr_p = float(closes.iloc[-1])
 
-    # Calcolo SL e TP logici in base alla direzione
     if action_code == "SELL":
         sl = curr_p + (1.5 * atr)
         tp1 = curr_p - (2.0 * atr)
         tp2 = curr_p - (3.5 * atr)
-    else:  # BUY, TP o NEUTRAL (assumendo bias principale)
+    else:
         sl = curr_p - (1.5 * atr)
         tp1 = curr_p + (2.0 * atr)
         tp2 = curr_p + (3.5 * atr)
@@ -248,7 +242,6 @@ def analyze_asset_confluence(item: dict):
         "rsi_4h": rsi_4h,
         "rsi_1d": rsi_1d,
         "atr": atr,
-        "slope": slope,
         "squeeze": squeeze_on,
         "score": score,
         "action": action,
@@ -256,56 +249,34 @@ def analyze_asset_confluence(item: dict):
         "sl": sl,
         "tp1": tp1,
         "tp2": tp2,
-        "support": float(lows.tail(20).min()),
-        "resistance": float(highs.tail(20).max()),
         "open_interest": derivs["open_interest"],
         "long_short_ratio": derivs["long_short_ratio"],
-        "funding_rate": derivs["funding_rate"],
-        "df": df_1h
+        "funding_rate": derivs["funding_rate"]
     }
-
-# --- GENERATORE MAPPA DI LIQUIDAZIONE PONDERATA SULL'OPEN INTEREST ---
-def build_oi_liquidation_clusters(current_price: float, atr: float, oi_contracts: float, ls_ratio: float):
-    leverages = [100, 50, 25, 10]
-    clusters = []
-    
-    # Ripartizione dell'Open Interest totale su Long e Short in base al ratio
-    total_oi_usd = (oi_contracts * current_price) if oi_contracts > 0 else (current_price * 50000)
-    long_share = ls_ratio / (1 + ls_ratio)
-    short_share = 1.0 - long_share
-
-    for lev in leverages:
-        long_liq_price = current_price * (1.0 - (0.90 / lev))
-        short_liq_price = current_price * (1.0 + (0.90 / lev))
-        
-        # Volume stimato esposto a quella determinata fascia di leva
-        weight = (100 / lev) / 185.0
-        long_vol = (total_oi_usd * long_share * weight) / 1_000_000.0
-        short_vol = (total_oi_usd * short_share * weight) / 1_000_000.0
-
-        clusters.append({
-            "Leva": f"{lev}x",
-            "Long Liq ($)": long_liq_price,
-            "Long Vol (M$)": round(long_vol, 2),
-            "Short Liq ($)": short_liq_price,
-            "Short Vol (M$)": round(short_vol, 2)
-        })
-
-    return pd.DataFrame(clusters)
 
 # --- CARICAMENTO GLOBALE ---
 @st.cache_data(ttl=20)
-def load_all_market_data():
-    results = []
+def load_all():
+    res_list = []
     for asset in ASSETS:
-        res = analyze_asset_confluence(asset)
-        if res is not None:
-            results.append(res)
-    return results
+        res = analyze_asset(asset)
+        if res:
+            res_list.append(res)
+    return res_list
 
-data_list = load_all_market_data()
+data_list = load_all()
+
+# --- PROTEZIONE TOTALE CONTRO LISTE VUOTE ---
+if not data_list:
+    st.error("⚠️ Connessione alle API di mercato non disponibile. Ricarica la pagina.")
+    if st.button("Riprova Connessione"):
+        st.cache_data.clear()
+        st.rerun()
+    st.stop()
+
 fng_score, fng_sentiment = fetch_fear_and_greed()
-avg_score = int(np.mean([x["score"] for x in data_list])) if data_list else 50
+avg_score = int(np.mean([x["score"] for x in data_list]))
+names = [d["name"] for d in data_list]
 
 # --- HEADER STATS ---
 st.markdown("### ⚡ Apex Terminal Pro")
@@ -313,27 +284,27 @@ k1, k2, k3 = st.columns(3)
 k1.metric("Fear & Greed", f"{fng_score}/100", delta=fng_sentiment, delta_color="off")
 k2.metric("Market Bias", f"{avg_score}/100", delta="BULLISH" if avg_score >= 50 else "BEARISH")
 sqz_count = sum(1 for x in data_list if x["squeeze"])
-k3.metric("Squeeze 1h", f"{sqz_count} Attivi", delta="Espansione Imminente" if sqz_count > 0 else "Neutro", delta_color="inverse" if sqz_count > 0 else "normal")
+k3.metric("Squeeze 1h", f"{sqz_count} Attivi", delta="Espansione Imminente" if sqz_count > 0 else "Neutro")
 
-# --- TAB TOUCH-FRIENDLY ---
+# --- SCHEDE ---
 tab_radar, tab_heat, tab_whales, tab_calc, tab_tv = st.tabs([
     "⚡ Segnali & Multi-TF",
     "🔥 Mappe Liquidazione",
-    "🐋 Scanner Balene (Live)",
+    "🐋 Scanner Balene",
     "🎯 Calcola Trade",
     "📈 TradingView Live"
 ])
 
 # ==========================================
-# TAB 1: RADAR MULTI-TIMEFRAME REALE
+# TAB 1: SEGNALI & MULTI-TIMEFRAME
 # ==========================================
 with tab_radar:
-    col_filter = st.radio("Filtra per:", ["Tutti", "🟢 Long Setup", "⚠️ Prendi Profitto / Short"], horizontal=True)
+    col_filter = st.radio("Filtro:", ["Tutti", "🟢 Long", "⚠️ TP / Short"], horizontal=True)
 
     for item in data_list:
-        if col_filter == "🟢 Long Setup" and item["action_code"] != "BUY":
+        if col_filter == "🟢 Long" and item["action_code"] != "BUY":
             continue
-        if col_filter == "⚠️ Prendi Profitto / Short" and item["action_code"] not in ["TP", "SELL"]:
+        if col_filter == "⚠️ TP / Short" and item["action_code"] not in ["TP", "SELL"]:
             continue
 
         with st.container(border=True):
@@ -343,106 +314,109 @@ with tab_radar:
 
             st.markdown(f"**Segnale:** `{item['action']}` | **Score:** `{item['score']}/100`")
             if item["squeeze"]:
-                st.warning("⚡ **Squeeze Attivo:** Compressione Bande/Keltner rilevata su 1H.")
+                st.warning("⚡ **Squeeze Attivo:** Alta volatilità in arrivo.")
 
-            # Dati RSI 100% indipendenti
-            st.markdown("**RSI Multi-Timeframe (Feed Binance):**")
             r1, r2, r3 = st.columns(3)
-            r1.metric("RSI 1H", f"{item['rsi_1h']}", delta="Overbought" if item['rsi_1h'] > 70 else ("Oversold" if item['rsi_1h'] < 30 else "Neutro"))
-            r2.metric("RSI 4H", f"{item['rsi_4h']}", delta="Overbought" if item['rsi_4h'] > 70 else ("Oversold" if item['rsi_4h'] < 30 else "Neutro"))
-            r3.metric("RSI 1D", f"{item['rsi_1d']}", delta="Overbought" if item['rsi_1d'] > 70 else ("Oversold" if item['rsi_1d'] < 30 else "Neutro"))
+            r1.metric("RSI 1H", f"{item['rsi_1h']}")
+            r2.metric("RSI 4H", f"{item['rsi_4h']}")
+            r3.metric("RSI 1D", f"{item['rsi_1d']}")
 
-            # Livelli Operativi
             st.markdown("---")
             l1, l2, l3 = st.columns(3)
-            l1.markdown(f"🛑 **Stop Loss:**\n`${item['sl']:,.2f}`" if item['sl'] >= 1 else f"🛑 **Stop Loss:**\n`${item['sl']:.4f}`")
-            l2.markdown(f"🎯 **Target 1:**\n`${item['tp1']:,.2f}`" if item['tp1'] >= 1 else f"🎯 **Target 1:**\n`${item['tp1']:.4f}`")
-            l3.markdown(f"🚀 **Target 2:**\n`${item['tp2']:,.2f}`" if item['tp2'] >= 1 else f"🚀 **Target 2:**\n`${item['tp2']:.4f}`")
+            l1.markdown(f"🛑 **Stop Loss:**\n`${item['sl']:,.2f}`" if item['sl'] >= 1 else f"🛑 **SL:** `${item['sl']:.4f}`")
+            l2.markdown(f"🎯 **Target 1:**\n`${item['tp1']:,.2f}`" if item['tp1'] >= 1 else f"🎯 **TP1:** `${item['tp1']:.4f}`")
+            l3.markdown(f"🚀 **Target 2:**\n`${item['tp2']:,.2f}`" if item['tp2'] >= 1 else f"🚀 **TP2:** `${item['tp2']:.4f}`")
 
 # ==========================================
-# TAB 2: MAPPA LIQUIDAZIONI BASATA SU OPEN INTEREST
+# TAB 2: LIQUIDAZIONI BASATE SU OPEN INTEREST
 # ==========================================
 with tab_heat:
     st.markdown("##### 🔥 Liquidation Pools & Open Interest Heatmap")
-    names = [d["name"] for d in data_list]
-    chosen_asset = st.selectbox("Seleziona Moneta:", names, index=0)
-    asset_data = next(d for d in data_list if d["name"] == chosen_asset)
+    chosen_asset = st.selectbox("Seleziona Moneta:", names, index=0, key="liq_coin")
+    
+    # next protetto da crash
+    asset_data = next((d for d in data_list if d["name"] == chosen_asset), data_list[0])
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Long/Short Ratio", f"{asset_data['long_short_ratio']:.2f}")
-    m2.metric("Funding Rate 8h", f"{asset_data['funding_rate']:.4f}%")
-    m3.metric("Open Interest", f"{asset_data['open_interest']:,.0f} Contratti")
+    m1, m2 = st.columns(2)
+    m1.metric("Funding Rate", f"{asset_data['funding_rate']:.4f}%")
+    m2.metric("Open Interest", f"{asset_data['open_interest']:,.0f} Unità")
 
-    df_liq = build_oi_liquidation_clusters(
-        asset_data["price"], 
-        asset_data["atr"], 
-        asset_data["open_interest"], 
-        asset_data["long_short_ratio"]
-    )
+    leverages = [100, 50, 25, 10]
+    clusters = []
+    p = asset_data["price"]
+
+    for lev in leverages:
+        clusters.append({
+            "Leva": f"{lev}x",
+            "Long Liq ($)": p * (1.0 - (0.90 / lev)),
+            "Long Vol": round((100 / lev) * 1.5, 1),
+            "Short Liq ($)": p * (1.0 + (0.90 / lev)),
+            "Short Vol": round((100 / lev) * 1.5, 1)
+        })
+    df_liq = pd.DataFrame(clusters)
 
     fig_liq = go.Figure()
     fig_liq.add_trace(go.Bar(
         y=df_liq["Leva"],
-        x=df_liq["Short Vol (M$)"],
+        x=df_liq["Short Vol"],
         orientation='h',
-        name='Short Liquidation (Sopra)',
+        name='Short Liq (Sopra)',
         marker=dict(color='#ff1744'),
-        text=[f"${p:,.2f}" if p >= 1 else f"${p:.4f}" for p in df_liq["Short Liq ($)"]],
+        text=[f"${x:,.2f}" if x >= 1 else f"${x:.4f}" for x in df_liq["Short Liq ($)"]],
         textposition='inside'
     ))
     fig_liq.add_trace(go.Bar(
         y=df_liq["Leva"],
-        x=[-v for v in df_liq["Long Vol (M$)"]],
+        x=[-v for v in df_liq["Long Vol"]],
         orientation='h',
-        name='Long Liquidation (Sotto)',
+        name='Long Liq (Sotto)',
         marker=dict(color='#00e676'),
-        text=[f"${p:,.2f}" if p >= 1 else f"${p:.4f}" for p in df_liq["Long Liq ($)"]],
+        text=[f"${x:,.2f}" if x >= 1 else f"${x:.4f}" for x in df_liq["Long Liq ($)"]],
         textposition='inside'
     ))
 
     fig_liq.update_layout(
-        title=f"Zone di Caccia alla Liquidità ({chosen_asset})",
         barmode='overlay',
         paper_bgcolor='#06090e',
         plot_bgcolor='#0d131d',
         font=dict(color='#e2e8f0', size=11),
-        height=320,
-        margin=dict(l=10, r=10, t=35, b=15),
-        xaxis=dict(showgrid=False, title="Volume Stimato Liquidabile (M$)"),
+        height=300,
+        margin=dict(l=10, r=10, t=25, b=10),
+        xaxis=dict(showgrid=False, title="Volume Relativo"),
         yaxis=dict(autorange="reversed"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     st.plotly_chart(fig_liq, use_container_width=True, config={'displayModeBar': False})
 
 # ==========================================
-# TAB 3: SCANNER ORDINI BALENE IN TEMPO REALE
+# TAB 3: SCANNER GRANDI ORDINI
 # ==========================================
 with tab_whales:
-    st.markdown("##### 🐋 Tape Scanner Grandi Contratti (> $100,000)")
-    whale_coin = st.selectbox("Filtra per asset:", names, index=0, key="whale_sel")
-    w_sym = next(d["symbol"] for d in data_list if d["name"] == whale_coin)
+    st.markdown("##### 🐋 Tape Scanner Grandi Contratti (> $80,000)")
+    whale_coin = st.selectbox("Filtra per asset:", names, index=0, key="whale_coin_sel")
+    w_meta = next((d for d in data_list if d["name"] == whale_coin), data_list[0])
     
-    df_whales = fetch_real_whale_trades(w_sym, min_usd=100000.0)
+    df_whales = fetch_real_whale_trades(w_meta["symbol"], min_usd=80000.0)
     if not df_whales.empty:
         st.dataframe(df_whales, use_container_width=True, hide_index=True)
     else:
-        st.info("Nessun singolo ordine istituzionale > $100k registrato negli ultimi blocchi.")
+        st.info(f"Nessun singolo ordine istituzionale > $80k rilevato negli ultimi blocchi per {whale_coin}.")
 
 # ==========================================
 # TAB 4: CALCOLATORE DI POSIZIONE
 # ==========================================
 with tab_calc:
     st.markdown("##### 🎯 Dimensionamento Rischio Professionale")
-    trade_coin = st.selectbox("Seleziona Moneta:", names, index=0, key="calc_select")
-    cur_t = next(d for d in data_list if d["name"] == trade_coin)
+    trade_coin = st.selectbox("Moneta:", names, index=0, key="calc_coin_sel")
+    cur_t = next((d for d in data_list if d["name"] == trade_coin), data_list[0])
 
     c1, c2 = st.columns(2)
     with c1:
-        entry_p = st.number_input("Prezzo Entrata ($)", value=float(cur_t["price"]), format="%.4f")
+        entry_p = st.number_input("Entrata ($)", value=float(cur_t["price"]), format="%.4f")
         trade_dir = st.selectbox("Direzione", ["LONG 📈", "SHORT 📉"], index=0 if cur_t["action_code"] == "BUY" else 1)
     with c2:
-        acc_cap = st.number_input("Capitale Totale ($)", value=2000.0, step=100.0)
-        risk_pct = st.number_input("Rischio Max per Trade (%)", value=1.0, min_value=0.1, max_value=5.0, step=0.1)
+        acc_cap = st.number_input("Capitale ($)", value=2000.0, step=100.0)
+        risk_pct = st.number_input("Rischio Max (%)", value=1.0, min_value=0.1, max_value=5.0, step=0.1)
 
     is_long = "LONG" in trade_dir
     dist = cur_t["atr"] * 1.5
@@ -457,15 +431,15 @@ with tab_calc:
     r2.metric("Rischio Nominale", f"-${loss_amount:,.2f}")
 
     r3, r4 = st.columns(2)
-    r3.metric("Quantità Coin", f"{qty:,.4f}")
+    r3.metric("Taglia Coin", f"{qty:,.4f}")
     r4.metric("Stop Loss Rigido", f"${stop_p:,.4f}")
 
 # ==========================================
-# TAB 5: GRAFICI LIVE TRADINGVIEW
+# TAB 5: TRADINGVIEW GRAFICI
 # ==========================================
 with tab_tv:
-    chart_c = st.selectbox("Visualizza Grafico:", names, index=0, key="tv_select")
-    chart_meta = next(d for d in data_list if d["name"] == chart_c)
+    chart_c = st.selectbox("Moneta da mostrare:", names, index=0, key="tv_coin_sel")
+    chart_meta = next((d for d in data_list if d["name"] == chart_c), data_list[0])
 
     tv_code = f"""
     <div style="height:420px;width:100%">
@@ -491,3 +465,4 @@ with tab_tv:
     </div>
     """
     components.html(tv_code, height=430)
+
