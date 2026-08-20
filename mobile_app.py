@@ -42,13 +42,9 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 def send_push_notification(title: str, message: str, priority: str = "high"):
+    headers = {"Title": title, "Priority": priority, "Tags": "warning,chart_with_upwards_trend"}
     try:
-        requests.post(
-            f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=message.encode("utf-8"),
-            headers={"Title": title, "Priority": priority, "Tags": "warning,chart_with_upwards_trend"},
-            timeout=3
-        )
+        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=message.encode("utf-8"), headers=headers, timeout=3)
     except Exception:
         pass
 
@@ -62,25 +58,29 @@ def send_push_notification(title: str, message: str, priority: str = "high"):
         except Exception:
             pass
 
-# --- LISTA ASSET GLOBALI ---
+# --- ASSET CONFIGURATION ---
 ASSETS = [
-    {"name": "BTC/USD", "symbol": "BTC"},
-    {"name": "ETH/USD", "symbol": "ETH"},
-    {"name": "SOL/USD", "symbol": "SOL"},
-    {"name": "TAO/USD", "symbol": "TAO"},
-    {"name": "ONDO/USD", "symbol": "ONDO"},
-    {"name": "HYPE/USD", "symbol": "HYPE"},
-    {"name": "WLD/USD", "symbol": "WLD"},
-    {"name": "ZEC/USD", "symbol": "ZEC"}
+    {"name": "BTC/USD", "symbol": "BTC", "cb_pair": "BTC-USD"},
+    {"name": "ETH/USD", "symbol": "ETH", "cb_pair": "ETH-USD"},
+    {"name": "SOL/USD", "symbol": "SOL", "cb_pair": "SOL-USD"},
+    {"name": "TAO/USD", "symbol": "TAO", "cb_pair": "TAO-USD"},
+    {"name": "ONDO/USD", "symbol": "ONDO", "cb_pair": "ONDO-USD"},
+    {"name": "HYPE/USD", "symbol": "HYPE", "cb_pair": "HYPE-USD"},
+    {"name": "WLD/USD", "symbol": "WLD", "cb_pair": "WLD-USD"},
+    {"name": "ZEC/USD", "symbol": "ZEC", "cb_pair": "ZEC-USD"}
 ]
 
-# --- CALCOLO INDICATORI QUANTITATIVI REALI ---
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+# --- CALCOLO INDICATORI QUANTITATIVI ---
 def compute_technical_indicators(df: pd.DataFrame):
     closes = df["close"]
     highs = df["high"]
     lows = df["low"]
 
-    # 1. RSI Reale (14 periodi con Wilder's Smoothing)
+    # 1. RSI (14 periodi Wilder)
     delta = closes.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -90,98 +90,110 @@ def compute_technical_indicators(df: pd.DataFrame):
     rsi = 100 - (100 / (1 + rs))
     current_rsi = round(float(rsi.iloc[-1]), 1) if not pd.isna(rsi.iloc[-1]) else 50.0
 
-    # 2. Bollinger Bands (20, 2.0)
+    # 2. Bollinger Bands
     sma20 = closes.rolling(20).mean()
     std20 = closes.rolling(20).std()
     bb_upper = sma20 + (2.0 * std20)
     bb_lower = sma20 - (2.0 * std20)
 
-    # 3. Keltner Channels (20, 1.5 ATR)
-    tr1 = highs - lows
-    tr2 = (highs - closes.shift(1)).abs()
-    tr3 = (lows - closes.shift(1)).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    # 3. Keltner Channels
+    tr = pd.concat([highs - lows, (highs - closes.shift(1)).abs(), (lows - closes.shift(1)).abs()], axis=1).max(axis=1)
     atr20 = tr.rolling(20).mean()
     kc_upper = sma20 + (1.5 * atr20)
     kc_lower = sma20 - (1.5 * atr20)
 
-    # 4. Squeeze Check (Bollinger all'interno di Keltner)
+    # 4. Squeeze Check
     squeeze_on = bool(bb_lower.iloc[-1] > kc_lower.iloc[-1] and bb_upper.iloc[-1] < kc_upper.iloc[-1])
 
-    # 5. Trend EMA (7 vs 25)
+    # 5. EMA Trend
     ema7 = closes.ewm(span=7, adjust=False).mean().iloc[-1]
     ema25 = closes.ewm(span=25, adjust=False).mean().iloc[-1]
     trend_bullish = ema7 > ema25
 
     return current_rsi, squeeze_on, trend_bullish
 
+def fetch_history_coinbase(pair: str):
+    try:
+        url = f"https://api.exchange.coinbase.com/products/{pair}/candles?granularity=3600"
+        res = requests.get(url, headers=HEADERS, timeout=2.5).json()
+        if isinstance(res, list) and len(res) >= 20:
+            df = pd.DataFrame(res, columns=["time", "low", "high", "open", "close", "volume"])
+            df = df.sort_values("time").reset_index(drop=True)
+            df["volumeto"] = df["volume"] * df["close"]
+            return df
+    except Exception:
+        pass
+    return None
+
+def fetch_history_cryptocompare(symbol: str):
+    try:
+        url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={symbol}&tsym=USD&limit=40"
+        res = requests.get(url, headers=HEADERS, timeout=2.5).json()
+        data_list = res.get("Data", {}).get("Data", [])
+        if data_list and len(data_list) >= 20:
+            df = pd.DataFrame(data_list)
+            df = df[["time", "open", "high", "low", "close", "volumeto"]].copy()
+            df = df[df["close"] > 0].reset_index(drop=True)
+            return df
+    except Exception:
+        pass
+    return None
+
 @st.cache_data(ttl=30)
 def fetch_real_quant_matrix():
     matrix = []
     
     for item in ASSETS:
-        sym = item["symbol"]
-        try:
-            # Candele orarie reali da CryptoCompare (compatibile con server USA / Cloud)
-            url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={sym}&tsym=USD&limit=50"
-            res = requests.get(url, timeout=4).json()
-            
-            data_list = res.get("Data", {}).get("Data", [])
-            if not data_list or len(data_list) < 25:
-                continue
+        # Priorità: Coinbase -> Fallback: CryptoCompare
+        df_k = fetch_history_coinbase(item["cb_pair"])
+        if df_k is None or len(df_k) < 20:
+            df_k = fetch_history_cryptocompare(item["symbol"])
 
-            df_k = pd.DataFrame(data_list)
-            df_k = df_k[["time", "open", "high", "low", "close", "volumeto"]].copy()
-            df_k = df_k[df_k["close"] > 0].reset_index(drop=True)
-
-            if len(df_k) < 20:
-                continue
-
-            curr_price = float(df_k["close"].iloc[-1])
-            prev_24h_close = float(df_k["close"].iloc[-24]) if len(df_k) >= 25 else float(df_k["close"].iloc[0])
-            pct_change_24h = ((curr_price - prev_24h_close) / prev_24h_close) * 100
-
-            rsi, squeeze, trend_bull = compute_technical_indicators(df_k)
-
-            # Scoring quantitativo
-            score = 50
-            if rsi < 35: score += 20
-            elif rsi > 65: score -= 18
-            if trend_bull: score += 12
-            else: score -= 12
-            if squeeze: score += 10
-            
-            score = max(5, min(95, score))
-            bias = "BULLISH" if score >= 50 else "BEARISH"
-
-            if score >= 70 and squeeze:
-                action = "🔥 ULTRA LONG"
-            elif score >= 58:
-                action = "🟢 LONG"
-            elif score <= 32 and squeeze:
-                action = "🚨 ULTRA SHORT"
-            elif score <= 42:
-                action = "🔴 SHORT"
-            else:
-                action = "💤 WAIT"
-
-            fmt_price = f"${curr_price:,.2f}" if curr_price >= 1 else f"${curr_price:.4f}"
-
-            matrix.append({
-                "Asset": item["name"],
-                "symbol": sym,
-                "Price": fmt_price,
-                "raw_price": curr_price,
-                "24h %": f"{pct_change_24h:+.2f}%",
-                "Squeeze": "⚡ SI" if squeeze else "NO",
-                "Bias": f"🟢 {bias}" if bias == "BULLISH" else f"🔴 {bias}",
-                "RSI": rsi,
-                "Score": score,
-                "Action": action,
-                "df_k": df_k
-            })
-        except Exception:
+        if df_k is None or len(df_k) < 20:
             continue
+
+        curr_price = float(df_k["close"].iloc[-1])
+        prev_24h_close = float(df_k["close"].iloc[-24]) if len(df_k) >= 25 else float(df_k["close"].iloc[0])
+        pct_change_24h = ((curr_price - prev_24h_close) / prev_24h_close) * 100
+
+        rsi, squeeze, trend_bull = compute_technical_indicators(df_k)
+
+        # Scoring quantitativo
+        score = 50
+        if rsi < 35: score += 20
+        elif rsi > 65: score -= 18
+        if trend_bull: score += 12
+        else: score -= 12
+        if squeeze: score += 10
+        
+        score = max(5, min(95, score))
+        bias = "BULLISH" if score >= 50 else "BEARISH"
+
+        if score >= 70 and squeeze:
+            action = "🔥 ULTRA LONG"
+        elif score >= 58:
+            action = "🟢 LONG"
+        elif score <= 32 and squeeze:
+            action = "🚨 ULTRA SHORT"
+        elif score <= 42:
+            action = "🔴 SHORT"
+        else:
+            action = "💤 WAIT"
+
+        fmt_price = f"${curr_price:,.2f}" if curr_price >= 1 else f"${curr_price:.4f}"
+
+        matrix.append({
+            "Asset": item["name"],
+            "Price": fmt_price,
+            "raw_price": curr_price,
+            "24h %": f"{pct_change_24h:+.2f}%",
+            "Squeeze": "⚡ SI" if squeeze else "NO",
+            "Bias": f"🟢 {bias}" if bias == "BULLISH" else f"🔴 {bias}",
+            "RSI": rsi,
+            "Score": score,
+            "Action": action,
+            "df_k": df_k
+        })
 
     return matrix
 
@@ -254,7 +266,7 @@ if not df_display.empty:
     vol_24h = df_chart["volumeto"].sum()
     m1, m2 = st.columns(2)
     with m1:
-        st.metric(label="Volume 24h (USD)", value=f"${vol_24h:,.0f}")
+        st.metric(label="Volume 24h Stimato", value=f"${vol_24h:,.0f}" if vol_24h > 0 else "N/A")
     with m2:
         st.metric(label="RSI Attuale (1H)", value=f"{selected_row['RSI']}")
 
@@ -272,4 +284,4 @@ if not df_display.empty:
         else:
             st.info("Nessuna anomalia quantitativa rilevata al momento.")
 else:
-    st.error("Errore di connessione all'API dati. Ricarica la pagina.")
+    st.warning("Caricamento feed di mercato...")
