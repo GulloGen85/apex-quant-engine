@@ -1,5 +1,4 @@
 import datetime
-import time
 import requests
 import pandas as pd
 import numpy as np
@@ -8,7 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
-# --- CONFIGURAZIONE PAGINA STREAMLIT ---
+# --- CONFIGURAZIONE STREAMLIT ---
 st.set_page_config(
     page_title="Apex Institutional Terminal Pro",
     layout="wide",
@@ -16,78 +15,39 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- CSS DARK THEME ULTRA-RESPONSIVE ---
+# --- DARK THEME OTTIMIZZATO ---
 st.markdown("""
 <style>
     .stApp { background-color: #080c14; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    .block-container {
-        padding-top: 0.6rem !important;
-        padding-bottom: 2rem !important;
-        padding-left: 0.6rem !important;
-        padding-right: 0.6rem !important;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 1.15rem !important;
-        color: #00f2fe !important;
-        font-weight: 800;
-    }
-    div[data-testid="stMetricLabel"] {
-        font-size: 0.72rem !important;
-        color: #94a3b8 !important;
-        font-weight: 600;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        display: flex;
-        overflow-x: auto;
-        white-space: nowrap;
-        gap: 6px;
-        padding-bottom: 6px;
-        border-bottom: 1px solid #1e293b;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #0d1527;
-        border-radius: 6px;
-        color: #94a3b8;
-        padding: 6px 12px;
-        font-size: 0.8rem;
-        font-weight: 700;
-        border: 1px solid #1e293b;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #1e293b !important;
-        color: #00f2fe !important;
-        border: 1px solid #00f2fe !important;
-    }
-    .card-asset {
-        background: #0d1527;
-        border: 1px solid #1e293b;
-        border-radius: 10px;
-        padding: 12px;
-        margin-bottom: 10px;
-    }
-    .sync-badge {
-        font-size: 0.70rem;
-        color: #64748b;
-        text-align: right;
-        margin-top: -12px;
-        margin-bottom: 8px;
-    }
+    .block-container { padding-top: 0.6rem !important; padding-bottom: 2rem !important; padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
+    div[data-testid="stMetricValue"] { font-size: 1.15rem !important; color: #00f2fe !important; font-weight: 800; }
+    div[data-testid="stMetricLabel"] { font-size: 0.72rem !important; color: #94a3b8 !important; font-weight: 600; }
+    .stTabs [data-baseweb="tab-list"] { display: flex; overflow-x: auto; white-space: nowrap; gap: 6px; padding-bottom: 6px; border-bottom: 1px solid #1e293b; }
+    .stTabs [data-baseweb="tab"] { background-color: #0d1527; border-radius: 6px; color: #94a3b8; padding: 6px 12px; font-size: 0.8rem; font-weight: 700; border: 1px solid #1e293b; }
+    .stTabs [aria-selected="true"] { background-color: #1e293b !important; color: #00f2fe !important; border: 1px solid #00f2fe !important; }
+    .card-asset { background: #0d1527; border: 1px solid #1e293b; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+    .sync-badge { font-size: 0.70rem; color: #64748b; text-align: right; margin-top: -12px; margin-bottom: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- LISTA ASSET TRACKER ---
+# --- ASSET TRACKER ---
 ASSETS = [
-    {"name": "BTC", "okx": "BTC-USDT", "tv": "BINANCE:BTCUSDT", "base_price": 70000.0},
-    {"name": "ETH", "okx": "ETH-USDT", "tv": "BINANCE:ETHUSDT", "base_price": 2400.0},
-    {"name": "SOL", "okx": "SOL-USDT", "tv": "BINANCE:SOLUSDT", "base_price": 90.0},
-    {"name": "NEAR", "okx": "NEAR-USDT", "tv": "BINANCE:NEARUSDT", "base_price": 1.7},
-    {"name": "TAO", "okx": "TAO-USDT", "tv": "BINANCE:TAOUSDT", "base_price": 210.0},
-    {"name": "WLD", "okx": "WLD-USDT", "tv": "BINANCE:WLDUSDT", "base_price": 1.2},
-    {"name": "ONDO", "okx": "ONDO-USDT", "tv": "BINANCE:ONDOUSDT", "base_price": 0.65},
-    {"name": "ZEC", "okx": "ZEC-USDT", "tv": "BINANCE:ZECUSDT", "base_price": 30.0}
+    {"name": "BTC", "okx": "BTC-USDT", "tv": "BINANCE:BTCUSDT", "base_price": 71800.0},
+    {"name": "ETH", "okx": "ETH-USDT", "tv": "BINANCE:ETHUSDT", "base_price": 2300.0},
+    {"name": "SOL", "okx": "SOL-USDT", "tv": "BINANCE:SOLUSDT", "base_price": 88.0},
+    {"name": "NEAR", "okx": "NEAR-USDT", "tv": "BINANCE:NEARUSDT", "base_price": 1.73},
+    {"name": "TAO", "okx": "TAO-USDT", "tv": "BINANCE:TAOUSDT", "base_price": 208.0},
+    {"name": "WLD", "okx": "WLD-USDT", "tv": "BINANCE:WLDUSDT", "base_price": 1.25},
+    {"name": "ONDO", "okx": "ONDO-USDT", "tv": "BINANCE:ONDOUSDT", "base_price": 0.67},
+    {"name": "ZEC", "okx": "ZEC-USDT", "tv": "BINANCE:ZECUSDT", "base_price": 31.0}
 ]
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+# Sessione HTTP globale riutilizzabile
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json"
+})
 
 def fmt_price(p: float) -> str:
     if p >= 1000:
@@ -108,64 +68,60 @@ def compute_rsi(series: pd.Series, period: int = 14) -> float:
     val = float(rsi.iloc[-1])
     return round(val, 1) if not np.isnan(val) else 50.0
 
-def fetch_okx_candles(inst_id: str, bar: str = "1H", limit: int = 40) -> pd.DataFrame:
+def fetch_asset_single_call(asset: dict):
+    inst = asset["okx"]
+    curr_p = asset["base_price"]
+    pct_24h = 0.5
+    rsi_1h, rsi_4h, rsi_1d = 50.0, 50.0, 50.0
+    atr = curr_p * 0.018
+    squeeze = False
+    trend_bull = True
+
     try:
-        url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}"
-        r = requests.get(url, headers=HEADERS, timeout=2.5)
+        url = f"https://www.okx.com/api/v5/market/candles?instId={inst}&bar=1H&limit=80"
+        r = SESSION.get(url, timeout=1.2)
         if r.status_code == 200:
             data = r.json().get("data", [])
-            if data and len(data) >= 15:
+            if data and len(data) >= 20:
                 df = pd.DataFrame(data, columns=["ts", "open", "high", "low", "close", "vol", "volCcy", "volCcyQuote", "confirm"])
                 for c in ["open", "high", "low", "close", "vol"]:
                     df[c] = df[c].astype(float)
                 df["ts"] = pd.to_numeric(df["ts"])
                 df = df.sort_values("ts").reset_index(drop=True)
-                return df
+
+                curr_p = float(df["close"].iloc[-1])
+                rsi_1h = compute_rsi(df["close"], 14)
+                
+                # Derivazione 4H e 1D da campionamento orario per azzerare chiamate HTTP
+                c_4h = df["close"].iloc[::4]
+                rsi_4h = compute_rsi(c_4h, 10) if len(c_4h) >= 11 else rsi_1h
+                
+                c_1d = df["close"].iloc[::24]
+                rsi_1d = compute_rsi(c_1d, 5) if len(c_1d) >= 6 else rsi_4h
+
+                h, l, c = df["high"], df["low"], df["close"]
+                tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
+                atr_calc = float(tr.rolling(14).mean().iloc[-1])
+                if not np.isnan(atr_calc) and atr_calc > 0:
+                    atr = atr_calc
+
+                # TTM Squeeze
+                sma20 = c.rolling(20).mean()
+                std20 = c.rolling(20).std()
+                bb_u, bb_l = sma20 + (2.0 * std20), sma20 - (2.0 * std20)
+                kc_u, kc_l = sma20 + (1.5 * atr), sma20 - (1.5 * atr)
+                squeeze = bool((bb_l.iloc[-1] > kc_l.iloc[-1]) and (bb_u.iloc[-1] < kc_u.iloc[-1])) if len(df) >= 20 else False
+
+                ema9 = c.ewm(span=9, adjust=False).mean().iloc[-1]
+                ema21 = c.ewm(span=21, adjust=False).mean().iloc[-1]
+                trend_bull = bool(ema9 >= ema21)
+
+                open_ref = df["open"].iloc[0]
+                pct_24h = ((curr_p - open_ref) / open_ref) * 100
     except Exception:
         pass
-    return pd.DataFrame()
 
-def analyze_asset_complete(asset: dict):
-    inst = asset["okx"]
-    df_1h = fetch_okx_candles(inst, "1H", 45)
-    df_4h = fetch_okx_candles(inst, "4H", 30)
-    df_1d = fetch_okx_candles(inst, "1D", 30)
-
-    if df_1h.empty:
-        curr_p = asset["base_price"]
-        pct_24h = 0.5
-        rsi_1h, rsi_4h, rsi_1d = 50.0, 50.0, 50.0
-        atr = curr_p * 0.02
-        squeeze = False
-        trend_bull = True
-    else:
-        curr_p = float(df_1h["close"].iloc[-1])
-        rsi_1h = compute_rsi(df_1h["close"])
-        rsi_4h = compute_rsi(df_4h["close"]) if not df_4h.empty else rsi_1h
-        rsi_1d = compute_rsi(df_1d["close"]) if not df_1d.empty else rsi_4h
-
-        # ATR (14)
-        h, l, c = df_1h["high"], df_1h["low"], df_1h["close"]
-        tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
-        atr = float(tr.rolling(14).mean().iloc[-1]) if len(df_1h) >= 14 else float(curr_p * 0.015)
-        if np.isnan(atr) or atr <= 0:
-            atr = curr_p * 0.015
-
-        # TTM Squeeze
-        sma20 = c.rolling(20).mean()
-        std20 = c.rolling(20).std()
-        bb_u, bb_l = sma20 + (2.0 * std20), sma20 - (2.0 * std20)
-        kc_u, kc_l = sma20 + (1.5 * atr), sma20 - (1.5 * atr)
-        squeeze = bool((bb_l.iloc[-1] > kc_l.iloc[-1]) and (bb_u.iloc[-1] < kc_u.iloc[-1])) if len(df_1h) >= 20 else False
-
-        ema9 = c.ewm(span=9, adjust=False).mean().iloc[-1]
-        ema21 = c.ewm(span=21, adjust=False).mean().iloc[-1]
-        trend_bull = bool(ema9 >= ema21)
-
-        open_ref = df_1d["open"].iloc[-1] if not df_1d.empty else df_1h["open"].iloc[0]
-        pct_24h = ((curr_p - open_ref) / open_ref) * 100
-
-    # Institutional Score (0-100)
+    # Score Istituzionale (0-100)
     score = 50
     score += 18 if trend_bull else -18
     score += 10 if squeeze else 0
@@ -174,7 +130,6 @@ def analyze_asset_complete(asset: dict):
     elif 45 <= rsi_1h <= 62 and trend_bull: score += 12
     score = max(5, min(95, score))
 
-    # Definizione Livelli Coerenti per Condizione di Mercato
     if rsi_1h >= 75 or rsi_4h >= 80:
         action = "⚠️ PRENDI PROFITTO (IPERCOMPRATO)"
         action_code = "TP"
@@ -182,7 +137,6 @@ def analyze_asset_complete(asset: dict):
         lvl1_lbl, lvl1_val = "🛡️ Trailing SL", curr_p - (0.8 * atr)
         lvl2_lbl, lvl2_val = "🎯 Dip Buy 1", curr_p - (1.8 * atr)
         lvl3_lbl, lvl3_val = "📉 Supporto Dip", curr_p - (3.2 * atr)
-
     elif score <= 38:
         action = "🔴 DISTRIBUISCI / SHORT"
         action_code = "SELL"
@@ -190,7 +144,6 @@ def analyze_asset_complete(asset: dict):
         lvl1_lbl, lvl1_val = "🛑 Stop Loss", curr_p + (1.5 * atr)
         lvl2_lbl, lvl2_val = "🎯 TP1 Short", curr_p - (2.0 * atr)
         lvl3_lbl, lvl3_val = "🚀 TP2 Short", curr_p - (3.8 * atr)
-
     elif score >= 62:
         action = "🟢 ACCUMULA / LONG"
         action_code = "BUY"
@@ -198,7 +151,6 @@ def analyze_asset_complete(asset: dict):
         lvl1_lbl, lvl1_val = "🛑 Stop Loss", curr_p - (1.5 * atr)
         lvl2_lbl, lvl2_val = "🎯 TP1 Long", curr_p + (2.0 * atr)
         lvl3_lbl, lvl3_val = "🚀 TP2 Long", curr_p + (3.8 * atr)
-
     else:
         action = "💤 NEUTRALE / ATTENDI RANGE"
         action_code = "NEUTRAL"
@@ -227,11 +179,11 @@ def analyze_asset_complete(asset: dict):
         "lvl3": (lvl3_lbl, lvl3_val)
     }
 
-def fetch_okx_whale_trades(inst_id: str, min_usd: float = 4000.0):
+def fetch_okx_whale_trades(inst_id: str, min_usd: float = 3000.0):
     trades = []
     try:
-        url = f"https://www.okx.com/api/v5/market/trades?instId={inst_id}&limit=100"
-        res = requests.get(url, headers=HEADERS, timeout=2.0).json()
+        url = f"https://www.okx.com/api/v5/market/trades?instId={inst_id}&limit=80"
+        res = SESSION.get(url, timeout=1.0).json()
         items = res.get("data", [])
         if isinstance(items, list):
             for t in items:
@@ -252,31 +204,31 @@ def fetch_okx_whale_trades(inst_id: str, min_usd: float = 4000.0):
         pass
     return pd.DataFrame(trades)
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def fetch_fear_and_greed():
     try:
-        res = requests.get("https://api.alternative.me/fng/?limit=1", timeout=2.0).json()
+        res = SESSION.get("https://api.alternative.me/fng/?limit=1", timeout=1.0).json()
         item = res["data"][0]
         return int(item["value"]), item["value_classification"]
     except Exception:
-        return 50, "Neutral"
+        return 65, "Greed"
 
-# --- SCARICAMENTO ASINCRONO ---
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=45)
 def load_all_market_intelligence():
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        results = list(ex.map(analyze_asset_complete, ASSETS))
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        results = list(ex.map(fetch_asset_single_call, ASSETS))
     return [r for r in results if r is not None]
 
+# --- ESECUZIONE VELOCE ---
 data_market = load_all_market_intelligence()
 fng_val, fng_label = fetch_fear_and_greed()
 avg_bias = int(np.mean([x["score"] for x in data_market])) if data_market else 50
 names_list = [d["name"] for d in data_market]
 now_str = datetime.datetime.now().strftime("%H:%M:%S")
 
-# --- HEADER STATS BAR & TIMESTAMP ---
+# --- HEADER STATS ---
 st.markdown("### ⚡ Apex Terminal Pro")
-st.markdown(f"<div class='sync-badge'>Feed Sincronizzato OKX Core • Ultimo Aggiornamento: <b>{now_str}</b></div>", unsafe_allow_html=True)
+st.markdown(f"<div class='sync-badge'>Live Feed OKX Core • Sync: <b>{now_str}</b></div>", unsafe_allow_html=True)
 
 k1, k2, k3 = st.columns(3)
 k1.metric("Fear & Greed", f"{fng_val}/100", delta=fng_label, delta_color="off")
@@ -323,7 +275,7 @@ with t_signals:
         """, unsafe_allow_html=True)
 
         if item["squeeze"]:
-            st.warning(f"⚡ **TTM Squeeze Attivo su {item['name']}:** Compressione di volatilità 1H. Atteso breakout forte.")
+            st.warning(f"⚡ **TTM Squeeze Attivo su {item['name']}:** Compressione 1H. Atteso breakout.")
 
         m1, m2, m3 = st.columns(3)
         m1.metric("RSI 1H", f"{item['rsi_1h']}")
@@ -406,7 +358,7 @@ with t_whales:
     w_coin = st.selectbox("Asset:", names_list, index=0, key="tape_coin_sel")
     w_meta = next(d for d in data_market if d["name"] == w_coin)
 
-    threshold = st.select_slider("Filtro Taglia Minima ($)", options=[2000, 4000, 8000, 15000], value=4000)
+    threshold = st.select_slider("Filtro Taglia Minima ($)", options=[2000, 3000, 5000, 10000], value=3000)
     df_tape = fetch_okx_whale_trades(w_meta["inst"], min_usd=float(threshold))
 
     if not df_tape.empty:
@@ -421,13 +373,13 @@ with t_whales:
         display_df = df_tape[["Ora", "Tipo", "Prezzo", "Controvalore", "Quantità"]]
         st.dataframe(display_df, use_container_width=True, hide_index=True, height=320)
     else:
-        st.info(f"Nessun blocco > ${threshold:,} nelle ultime 100 esecuzioni su {w_coin}.")
+        st.info(f"Nessun blocco > ${threshold:,} registrato su {w_coin} nell'ultimo blocco. Diminuisci la soglia.")
 
 # ==========================================
 # TAB 4: RISK & POSITION SIZING
 # ==========================================
 with t_calc:
-    st.markdown("##### 🎯 Dimensionamento Posizione & Gestione Rischio")
+    st.markdown("##### 🎯 Dimensionamento Posizione & Rischio")
     calc_c = st.selectbox("Asset Operativo:", names_list, index=0, key="calc_select_c")
     calc_meta = next(d for d in data_market if d["name"] == calc_c)
 
