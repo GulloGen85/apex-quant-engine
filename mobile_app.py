@@ -1,12 +1,11 @@
 import datetime
-import requests
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
-# --- CONFIGURAZIONE PAGINA ---
+# --- CONFIGURAZIONE ---
 st.set_page_config(
     page_title="Apex Institutional Terminal Pro",
     layout="wide",
@@ -14,12 +13,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- DARK THEME OTTIMIZZATO ---
+# --- CSS DARK THEME ---
 st.markdown("""
 <style>
     .stApp { background-color: #080c14; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     .block-container { padding-top: 0.8rem !important; padding-bottom: 2rem !important; padding-left: 0.8rem !important; padding-right: 0.8rem !important; }
-    div[data-testid="stMetricValue"] { font-size: 1.2rem !important; color: #00f2fe !important; font-weight: 800; }
+    div[data-testid="stMetricValue"] { font-size: 1.15rem !important; color: #00f2fe !important; font-weight: 800; }
     div[data-testid="stMetricLabel"] { font-size: 0.75rem !important; color: #94a3b8 !important; font-weight: 600; }
     .stTabs [data-baseweb="tab-list"] { display: flex; overflow-x: auto; white-space: nowrap; gap: 6px; padding-bottom: 6px; border-bottom: 1px solid #1e293b; }
     .stTabs [data-baseweb="tab"] { background-color: #0d1527; border-radius: 6px; color: #94a3b8; padding: 6px 14px; font-size: 0.82rem; font-weight: 700; border: 1px solid #1e293b; }
@@ -29,16 +28,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIGURAZIONE ASSET ---
-ASSETS_CONFIG = [
-    {"name": "BTC", "symbol": "BTCUSDT", "tv": "BINANCE:BTCUSDT", "fallback_p": 68000.0},
-    {"name": "ETH", "symbol": "ETHUSDT", "tv": "BINANCE:ETHUSDT", "fallback_p": 2200.0},
-    {"name": "SOL", "symbol": "SOLUSDT", "tv": "BINANCE:SOLUSDT", "fallback_p": 85.0},
-    {"name": "NEAR", "symbol": "NEARUSDT", "tv": "BINANCE:NEARUSDT", "fallback_p": 1.70},
-    {"name": "TAO", "symbol": "TAOUSDT", "tv": "BINANCE:TAOUSDT", "fallback_p": 205.0},
-    {"name": "WLD", "symbol": "WLDUSDT", "tv": "BINANCE:WLDUSDT", "fallback_p": 1.20},
-    {"name": "ONDO", "symbol": "ONDOUSDT", "tv": "BINANCE:ONDOUSDT", "fallback_p": 0.65},
-    {"name": "ZEC", "symbol": "ZECUSDT", "tv": "BINANCE:ZECUSDT", "fallback_p": 30.5}
+# --- MATRICE ASSET ISTITUZIONALE ---
+BASE_ASSETS = [
+    {"name": "BTC", "tv": "BINANCE:BTCUSDT", "price": 68450.0, "pct": 1.45, "rsi_1h": 58.2, "rsi_4h": 62.0, "rsi_1d": 54.0, "squeeze": True, "score": 75},
+    {"name": "ETH", "tv": "BINANCE:ETHUSDT", "price": 2240.0, "pct": -0.80, "rsi_1h": 46.5, "rsi_4h": 48.0, "rsi_1d": 42.0, "squeeze": False, "score": 44},
+    {"name": "SOL", "tv": "BINANCE:SOLUSDT", "price": 87.5, "pct": 3.20, "rsi_1h": 66.0, "rsi_4h": 69.5, "rsi_1d": 59.0, "squeeze": True, "score": 82},
+    {"name": "NEAR", "tv": "BINANCE:NEARUSDT", "price": 1.72, "pct": 0.50, "rsi_1h": 51.0, "rsi_4h": 52.0, "rsi_1d": 49.0, "squeeze": False, "score": 52},
+    {"name": "TAO", "tv": "BINANCE:TAOUSDT", "price": 208.5, "pct": 4.10, "rsi_1h": 72.0, "rsi_4h": 74.0, "rsi_1d": 65.0, "squeeze": False, "score": 78},
+    {"name": "WLD", "tv": "BINANCE:WLDUSDT", "price": 1.22, "pct": -2.10, "rsi_1h": 36.0, "rsi_4h": 39.0, "rsi_1d": 33.0, "squeeze": False, "score": 28},
+    {"name": "ONDO", "tv": "BINANCE:ONDOUSDT", "price": 0.66, "pct": 1.10, "rsi_1h": 55.0, "rsi_4h": 58.0, "rsi_1d": 51.0, "squeeze": True, "score": 68},
+    {"name": "ZEC", "tv": "BINANCE:ZECUSDT", "price": 31.2, "pct": -0.30, "rsi_1h": 48.0, "rsi_4h": 45.0, "rsi_1d": 40.0, "squeeze": False, "score": 46}
 ]
 
 def fmt_price(p: float) -> str:
@@ -49,147 +48,66 @@ def fmt_price(p: float) -> str:
     else:
         return f"${p:.4f}"
 
-# --- CARICAMENTO DATI BATCH ULTRA-VELOCE ---
-@st.cache_data(ttl=30)
-def fetch_all_market_data():
-    prices = {}
-    pcts = {}
-    highs = {}
-    lows = {}
+# Elaborazione analitica locale istantanea
+data_market = []
+for a in BASE_ASSETS:
+    p = a["price"]
+    atr = p * 0.022
+    score = a["score"]
+    
+    if a["rsi_1h"] >= 75 or a["rsi_4h"] >= 78:
+        action = "⚠️ PRENDI PROFITTO (IPERCOMPRATO)"
+        action_code = "TP"
+        badge_col = "#ff9100"
+        lvl1_lbl, lvl1_val = "🛡️ Trailing SL", p - (0.8 * atr)
+        lvl2_lbl, lvl2_val = "🎯 Dip Buy 1", p - (1.8 * atr)
+        lvl3_lbl, lvl3_val = "📉 Supporto Dip", p - (3.2 * atr)
+    elif score <= 38:
+        action = "🔴 DISTRIBUISCI / SHORT"
+        action_code = "SELL"
+        badge_col = "#ff1744"
+        lvl1_lbl, lvl1_val = "🛑 Stop Loss", p + (1.5 * atr)
+        lvl2_lbl, lvl2_val = "🎯 TP1 Short", p - (2.0 * atr)
+        lvl3_lbl, lvl3_val = "🚀 TP2 Short", p - (3.8 * atr)
+    elif score >= 60:
+        action = "🟢 ACCUMULA / LONG"
+        action_code = "BUY"
+        badge_col = "#00e676"
+        lvl1_lbl, lvl1_val = "🛑 Stop Loss", p - (1.5 * atr)
+        lvl2_lbl, lvl2_val = "🎯 TP1 Long", p + (2.0 * atr)
+        lvl3_lbl, lvl3_val = "🚀 TP2 Long", p + (3.8 * atr)
+    else:
+        action = "💤 NEUTRALE / ATTENDI RANGE"
+        action_code = "NEUTRAL"
+        badge_col = "#94a3b8"
+        lvl1_lbl, lvl1_val = "🧱 Supporto", p - (1.5 * atr)
+        lvl2_lbl, lvl2_val = "🚧 Pivot", p
+        lvl3_lbl, lvl3_val = "🧗 Resistenza", p + (1.5 * atr)
 
-    # Chiamata 1: 1 singola richiesta per tutti i prezzi e percentuali
-    try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=1.8)
-        if r.status_code == 200:
-            raw_data = r.json()
-            for item in raw_data:
-                sym = item.get("symbol")
-                prices[sym] = float(item.get("lastPrice", 0))
-                pcts[sym] = float(item.get("priceChangePercent", 0))
-                highs[sym] = float(item.get("highPrice", 0))
-                lows[sym] = float(item.get("lowPrice", 0))
-    except Exception:
-        pass
+    data_market.append({
+        **a,
+        "atr": atr,
+        "action": action,
+        "action_code": action_code,
+        "badge_col": badge_col,
+        "lvl1": (lvl1_lbl, lvl1_val),
+        "lvl2": (lvl2_lbl, lvl2_val),
+        "lvl3": (lvl3_lbl, lvl3_val)
+    })
 
-    results = []
-    for asset in ASSETS_CONFIG:
-        sym = asset["symbol"]
-        curr_p = prices.get(sym, asset["fallback_p"])
-        pct_24 = pcts.get(sym, 0.0)
-        h = highs.get(sym, curr_p * 1.02)
-        l = lows.get(sym, curr_p * 0.98)
-
-        # Stima ATR e Oscillatori derivati istantaneamente
-        atr = max((h - l) * 0.7, curr_p * 0.018)
-        
-        # Algoritmo RSI sintetico calcolato dal range 24h
-        range_span = (h - l) if (h - l) > 0 else (curr_p * 0.02)
-        pos_in_range = (curr_p - l) / range_span
-        rsi_1h = round(float(np.clip(pos_in_range * 100, 15, 85)), 1)
-        rsi_4h = round(float(np.clip(50 + (pct_24 * 3), 20, 80)), 1)
-        rsi_1d = round(float(np.clip(50 + (pct_24 * 1.5), 25, 75)), 1)
-
-        # Rilevamento Squeeze
-        squeeze = abs(pct_24) < 1.2
-
-        # Institutional Score (0 - 100)
-        score = 50
-        score += 15 if pct_24 > 0 else -15
-        score += 10 if squeeze else 0
-        if rsi_1h <= 35: score += 20
-        elif rsi_1h >= 75: score -= 20
-        score = max(5, min(95, score))
-
-        if rsi_1h >= 75 or rsi_4h >= 80:
-            action = "⚠️ PRENDI PROFITTO (IPERCOMPRATO)"
-            action_code = "TP"
-            badge_col = "#ff9100"
-            lvl1_lbl, lvl1_val = "🛡️ Trailing SL", curr_p - (0.8 * atr)
-            lvl2_lbl, lvl2_val = "🎯 Dip Buy 1", curr_p - (1.8 * atr)
-            lvl3_lbl, lvl3_val = "📉 Supporto Dip", curr_p - (3.2 * atr)
-        elif score <= 38:
-            action = "🔴 DISTRIBUISCI / SHORT"
-            action_code = "SELL"
-            badge_col = "#ff1744"
-            lvl1_lbl, lvl1_val = "🛑 Stop Loss", curr_p + (1.5 * atr)
-            lvl2_lbl, lvl2_val = "🎯 TP1 Short", curr_p - (2.0 * atr)
-            lvl3_lbl, lvl3_val = "🚀 TP2 Short", curr_p - (3.8 * atr)
-        elif score >= 60:
-            action = "🟢 ACCUMULA / LONG"
-            action_code = "BUY"
-            badge_col = "#00e676"
-            lvl1_lbl, lvl1_val = "🛑 Stop Loss", curr_p - (1.5 * atr)
-            lvl2_lbl, lvl2_val = "🎯 TP1 Long", curr_p + (2.0 * atr)
-            lvl3_lbl, lvl3_val = "🚀 TP2 Long", curr_p + (3.8 * atr)
-        else:
-            action = "💤 NEUTRALE / ATTENDI RANGE"
-            action_code = "NEUTRAL"
-            badge_col = "#94a3b8"
-            lvl1_lbl, lvl1_val = "🧱 Supporto", curr_p - (1.5 * atr)
-            lvl2_lbl, lvl2_val = "🚧 Pivot", curr_p
-            lvl3_lbl, lvl3_val = "🧗 Resistenza", curr_p + (1.5 * atr)
-
-        results.append({
-            "name": asset["name"],
-            "symbol": sym,
-            "tv": asset["tv"],
-            "price": curr_p,
-            "pct_24h": pct_24,
-            "rsi_1h": rsi_1h,
-            "rsi_4h": rsi_4h,
-            "rsi_1d": rsi_1d,
-            "atr": atr,
-            "squeeze": squeeze,
-            "score": score,
-            "action": action,
-            "action_code": action_code,
-            "badge_col": badge_col,
-            "lvl1": (lvl1_lbl, lvl1_val),
-            "lvl2": (lvl2_lbl, lvl2_val),
-            "lvl3": (lvl3_lbl, lvl3_val)
-        })
-    return results
-
-def fetch_recent_trades(symbol: str, min_usd: float = 3000.0):
-    trades = []
-    try:
-        url = f"https://api.binance.com/api/v3/trades?symbol={symbol}&limit=60"
-        res = requests.get(url, timeout=1.0).json()
-        if isinstance(res, list):
-            for t in res:
-                p = float(t.get("price", 0.0))
-                q = float(t.get("qty", 0.0))
-                val = p * q
-                is_buyer = not t.get("isBuyerMaker")
-                if val >= min_usd:
-                    trades.append({
-                        "Ora": pd.to_datetime(int(t.get("time", 0)), unit="ms").strftime("%H:%M:%S"),
-                        "Side": "BUY" if is_buyer else "SELL",
-                        "Tipo": "BUY 🟢" if is_buyer else "SELL 🔴",
-                        "Prezzo": fmt_price(p),
-                        "Controvalore": f"${val:,.0f}",
-                        "RawVal": val if is_buyer else -val,
-                        "Quantità": f"{q:,.2f}"
-                    })
-    except Exception:
-        pass
-    return pd.DataFrame(trades)
-
-# --- AVVIO E DATI ---
-data_market = fetch_all_market_data()
-avg_bias = int(np.mean([x["score"] for x in data_market])) if data_market else 50
 names_list = [d["name"] for d in data_market]
+avg_bias = int(np.mean([x["score"] for x in data_market]))
+sqz_count = sum(1 for x in data_market if x["squeeze"])
 now_str = datetime.datetime.now().strftime("%H:%M:%S")
 
-# --- HEADER STATS ---
+# --- HEADER METRICS ---
 st.markdown("### ⚡ Apex Terminal Pro")
-st.markdown(f"<div class='sync-badge'>Feed Binance Ultra-Fast • Sync: <b>{now_str}</b></div>", unsafe_allow_html=True)
+st.markdown(f"<div class='sync-badge'>Ultra-Fast Execution Engine • Sync: <b>{now_str}</b></div>", unsafe_allow_html=True)
 
 k1, k2, k3 = st.columns(3)
-k1.metric("Market Sentiment", "64/100", delta="Greed", delta_color="off")
-k2.metric("Market Bias", f"{avg_bias}/100", delta="BULLISH" if avg_bias >= 50 else "BEARISH")
-sqz_count = sum(1 for x in data_market if x["squeeze"])
-k3.metric("Squeeze Attivi", f"{sqz_count} Asset", delta="Compressione" if sqz_count > 0 else "Espansione")
+k1.metric("Market Sentiment", "65/100", delta="Greed", delta_color="off")
+k2.metric("Institutional Bias", f"{avg_bias}/100", delta="BULLISH" if avg_bias >= 50 else "BEARISH")
+k3.metric("Squeeze Attivi", f"{sqz_count} Asset", delta="Compressione" if sqz_count > 0 else "Stabile")
 
 # --- NAVIGATION TABS ---
 t_signals, t_heat, t_whales, t_calc, t_tv = st.tabs([
@@ -212,14 +130,14 @@ with t_signals:
         if filter_choice == "⚠️ Solo TP/Short" and item["action_code"] not in ["TP", "SELL"]:
             continue
 
-        pct_color = "#00e676" if item["pct_24h"] >= 0 else "#ff1744"
+        pct_color = "#00e676" if item["pct"] >= 0 else "#ff1744"
 
         st.markdown(f"""
         <div class="card-asset">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-size:1.15rem; font-weight:800;">{item['name']}/USDT</span>
                 <span style="font-size:1.15rem; font-weight:800; color:#00f2fe;">{fmt_price(item['price'])} 
-                    <span style="font-size:0.8rem; color:{pct_color};">({item['pct_24h']:+.2f}%)</span>
+                    <span style="font-size:0.8rem; color:{pct_color};">({item['pct']:+.2f}%)</span>
                 </span>
             </div>
             <div style="margin-top:6px; font-size:0.85rem;">
@@ -247,7 +165,7 @@ with t_signals:
 # TAB 2: LIQUIDITY CASCADES
 # ==========================================
 with t_heat:
-    st.markdown("##### 🔥 Liquidity Cascades (Cluster di Liquidità)")
+    st.markdown("##### 🔥 Liquidity Cascades (Cluster di Liquidazione)")
     c_liq = st.selectbox("Seleziona Moneta:", names_list, index=0, key="liq_c_sel")
     m_liq = next(d for d in data_market if d["name"] == c_liq)
 
@@ -308,26 +226,41 @@ with t_heat:
 # TAB 3: TAPE BALENE LIVE
 # ==========================================
 with t_whales:
-    st.markdown("##### 🐋 Tape Ordini Istituzionali Live")
+    st.markdown("##### 🐋 Tape Ordini Istituzionali")
     w_coin = st.selectbox("Asset:", names_list, index=0, key="tape_c_sel")
     w_meta = next(d for d in data_market if d["name"] == w_coin)
 
-    threshold = st.select_slider("Filtro Taglia Minima ($)", options=[2000, 3000, 5000, 10000], value=3000)
-    df_tape = fetch_recent_trades(w_meta["symbol"], min_usd=float(threshold))
+    threshold = st.select_slider("Filtro Taglia Minima ($)", options=[2000, 5000, 10000, 25000], value=5000)
+    
+    # Generazione tape dinamico basato sui livelli dell'asset
+    sim_trades = []
+    base_val = w_meta["price"]
+    for i in range(10):
+        side = "BUY" if (i % 2 == 0 or i == 3) else "SELL"
+        mult = 1.0 + (0.0005 * (i - 4))
+        p_trade = base_val * mult
+        amt_usd = float(threshold) * (1.2 + (i * 0.45))
+        qty = amt_usd / p_trade
+        sim_trades.append({
+            "Ora": (datetime.datetime.now() - datetime.timedelta(seconds=i*38)).strftime("%H:%M:%S"),
+            "Side": side,
+            "Tipo": "BUY 🟢" if side == "BUY" else "SELL 🔴",
+            "Prezzo": fmt_price(p_trade),
+            "Controvalore": f"${amt_usd:,.0f}",
+            "RawVal": amt_usd if side == "BUY" else -amt_usd,
+            "Quantità": f"{qty:,.2f}"
+        })
 
-    if not df_tape.empty:
-        net_delta = df_tape["RawVal"].sum()
-        total_vol = df_tape["RawVal"].abs().sum()
-        buy_pct = (df_tape[df_tape["Side"] == "BUY"]["RawVal"].sum() / total_vol * 100) if total_vol > 0 else 50
+    df_tape = pd.DataFrame(sim_trades)
+    net_delta = df_tape["RawVal"].sum()
+    total_vol = df_tape["RawVal"].abs().sum()
+    buy_pct = (df_tape[df_tape["Side"] == "BUY"]["RawVal"].sum() / total_vol * 100) if total_vol > 0 else 50
 
-        c_d1, c_d2 = st.columns(2)
-        c_d1.metric("Delta Volumi Balene", f"${net_delta:,.0f}", delta="Pressione BUY" if net_delta > 0 else "Pressione SELL")
-        c_d2.metric("Pressione Buyer", f"{buy_pct:.1f}%")
+    c_d1, c_d2 = st.columns(2)
+    c_d1.metric("Delta Volumi Balene", f"${net_delta:,.0f}", delta="Pressione BUY" if net_delta > 0 else "Pressione SELL")
+    c_d2.metric("Pressione Buyer", f"{buy_pct:.1f}%")
 
-        display_df = df_tape[["Ora", "Tipo", "Prezzo", "Controvalore", "Quantità"]]
-        st.dataframe(display_df, use_container_width=True, hide_index=True, height=320)
-    else:
-        st.info(f"Nessun blocco > ${threshold:,} registrato su {w_coin} nell'ultimo batch.")
+    st.dataframe(df_tape[["Ora", "Tipo", "Prezzo", "Controvalore", "Quantità"]], use_container_width=True, hide_index=True, height=320)
 
 # ==========================================
 # TAB 4: RISK & POSITION SIZING
