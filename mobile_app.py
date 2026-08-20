@@ -1,29 +1,29 @@
 import os
+import time
 import requests
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
 import streamlit.components.v1 as components
 
-# --- CONFIGURAZIONE INTERFACCIA MOBILE-FIRST ---
+# --- CONFIGURAZIONE INTERFACCIA ---
 st.set_page_config(
-    page_title="Apex Institutional Terminal",
+    page_title="Apex Institutional Terminal Pro",
     layout="wide",
     page_icon="⚡",
     initial_sidebar_state="collapsed"
 )
 
-# --- CSS DARK INSTITUTIONAL ---
+# --- CSS DARK INSTITUTIONAL OTTIMIZZATO ---
 st.markdown("""
 <style>
     .stApp { background-color: #06090e; color: #f1f5f9; }
     .block-container {
         padding-top: 0.6rem !important;
-        padding-bottom: 3.5rem !important;
-        padding-left: 0.5rem !important;
-        padding-right: 0.5rem !important;
+        padding-bottom: 3rem !important;
+        padding-left: 0.6rem !important;
+        padding-right: 0.6rem !important;
     }
     div[data-testid="stMetricValue"] {
         font-size: 1.15rem !important;
@@ -57,68 +57,90 @@ st.markdown("""
     }
     .stButton>button {
         width: 100% !important;
-        min-height: 44px !important;
+        min-height: 42px !important;
         font-weight: 800 !important;
         border-radius: 8px !important;
         background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
         color: #ffffff !important;
         border: none !important;
     }
-    div[data-testid="stExpander"] {
-        background-color: #0d131d;
-        border: 1px solid #1e293b !important;
-        border-radius: 8px !important;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- ASSET MASTER LIST ---
+# --- LISTA ASSET TRACCIATI ---
 ASSETS = [
-    {"name": "BTC", "pair": "BTC/USDC", "cb_pair": "BTC-USD", "tv_symbol": "BINANCE:BTCUSDT"},
-    {"name": "ETH", "pair": "ETH/USDC", "cb_pair": "ETH-USD", "tv_symbol": "BINANCE:ETHUSDT"},
-    {"name": "SOL", "pair": "SOL/USDC", "cb_pair": "SOL-USD", "tv_symbol": "BINANCE:SOLUSDT"},
-    {"name": "NEAR", "pair": "NEAR/USDC", "cb_pair": "NEAR-USD", "tv_symbol": "BINANCE:NEARUSDT"},
-    {"name": "TAO", "pair": "TAO/USDT", "cb_pair": "TAO-USD", "tv_symbol": "BINANCE:TAOUSDT"},
-    {"name": "WLD", "pair": "WLD/USDC", "cb_pair": "WLD-USD", "tv_symbol": "BINANCE:WLDUSDT"},
-    {"name": "ONDO", "pair": "ONDO/USDT", "cb_pair": "ONDO-USD", "tv_symbol": "BINANCE:ONDOUSDT"},
-    {"name": "ZEC", "pair": "ZEC/USDT", "cb_pair": "ZEC-USD", "tv_symbol": "BINANCE:ZECUSDT"},
-    {"name": "HYPE", "pair": "HYPE/USDT", "cb_pair": "HYPE-USD", "tv_symbol": "BYBIT:HYPEUSDT"}
+    {"name": "BTC", "symbol": "BTCUSDT", "tv_symbol": "BINANCE:BTCUSDT"},
+    {"name": "ETH", "symbol": "ETHUSDT", "tv_symbol": "BINANCE:ETHUSDT"},
+    {"name": "SOL", "symbol": "SOLUSDT", "tv_symbol": "BINANCE:SOLUSDT"},
+    {"name": "NEAR", "symbol": "NEARUSDT", "tv_symbol": "BINANCE:NEARUSDT"},
+    {"name": "TAO", "symbol": "TAOUSDT", "tv_symbol": "BINANCE:TAOUSDT"},
+    {"name": "WLD", "symbol": "WLDUSDT", "tv_symbol": "BINANCE:WLDUSDT"},
+    {"name": "ONDO", "symbol": "ONDOUSDT", "tv_symbol": "BINANCE:ONDOUSDT"},
+    {"name": "ZEC", "symbol": "ZECUSDT", "tv_symbol": "BINANCE:ZECUSDT"}
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# --- FUNZIONI DI INGESTION DATI MULTI-TIMEFRAME ---
-def fetch_candles(symbol: str, timeframe: str = "1h", limit: int = 50):
-    """Recupera candele storiche per 1h, 4h o 1D"""
+# --- INGESTION FEED SPOT & FUTURES IN TEMPO REALE ---
+def fetch_binance_klines(symbol: str, interval: str, limit: int = 50):
+    """Estrae candele indipendenti per 1h, 4h o 1d direttamente da Binance Spot"""
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
-        if timeframe == "1h":
-            url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={symbol}&tsym=USD&limit={limit}"
-        elif timeframe == "4h":
-            url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={symbol}&tsym=USD&limit={limit*4}&aggregate=4"
-        else: # 1D
-            url = f"https://min-api.cryptocompare.com/data/v2/histoday?fsym={symbol}&tsym=USD&limit={limit}"
-
         res = requests.get(url, headers=HEADERS, timeout=2.5).json()
-        data = res.get("Data", {}).get("Data", [])
-        if data and len(data) >= 20:
-            df = pd.DataFrame(data)[["time", "open", "high", "low", "close", "volumeto"]]
-            return df[df["close"] > 0].reset_index(drop=True)
+        if isinstance(res, list) and len(res) >= 20:
+            df = pd.DataFrame(res, columns=[
+                "open_time", "open", "high", "low", "close", "volume",
+                "close_time", "quote_asset_volume", "number_of_trades",
+                "taker_buy_base", "taker_buy_quote", "ignore"
+            ])
+            for col in ["open", "high", "low", "close", "volume", "quote_asset_volume"]:
+                df[col] = df[col].astype(float)
+            return df
     except Exception:
         pass
-
-    # Fallback Coinbase per 1h
-    if timeframe == "1h":
-        try:
-            url = f"https://api.exchange.coinbase.com/products/{symbol}-USD/candles?granularity=3600"
-            res = requests.get(url, headers=HEADERS, timeout=2.5).json()
-            if isinstance(res, list) and len(res) >= 20:
-                df = pd.DataFrame(res, columns=["time", "low", "high", "open", "close", "volume"])
-                df = df.sort_values("time").reset_index(drop=True)
-                df["volumeto"] = df["volume"] * df["close"]
-                return df
-        except Exception:
-            pass
     return None
+
+def fetch_derivatives_data(symbol: str):
+    """Recupera Open Interest, Long/Short Ratio e Funding Rate reali dai Futures Binance"""
+    data = {"open_interest": 0.0, "long_short_ratio": 1.0, "funding_rate": 0.0}
+    try:
+        # Open Interest
+        oi_res = requests.get(f"https://fapi.binance.com/fapi/v1/openInterest?symbol={symbol}", timeout=2.0).json()
+        data["open_interest"] = float(oi_res.get("openInterest", 0.0))
+        
+        # Funding Rate
+        fr_res = requests.get(f"https://fapi.binance.com/fapi/v1/premiumIndex?symbol={symbol}", timeout=2.0).json()
+        data["funding_rate"] = float(fr_res.get("lastFundingRate", 0.0)) * 100
+
+        # Long/Short Account Ratio
+        ls_res = requests.get(f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={symbol}&period=1h&limit=1", timeout=2.0).json()
+        if isinstance(ls_res, list) and len(ls_res) > 0:
+            data["long_short_ratio"] = float(ls_res[0].get("longShortRatio", 1.0))
+    except Exception:
+        pass
+    return data
+
+def fetch_real_whale_trades(symbol: str, min_usd: float = 100000.0):
+    """Cattura ordini a mercato istituzionali reali (> $100k) dai Futures"""
+    trades = []
+    try:
+        url = f"https://fapi.binance.com/fapi/v1/trades?symbol={symbol}&limit=100"
+        res = requests.get(url, headers=HEADERS, timeout=2.5).json()
+        if isinstance(res, list):
+            for t in res:
+                usd_val = float(t["price"]) * float(t["qty"])
+                if usd_val >= min_usd:
+                    trades.append({
+                        "Orario": pd.to_datetime(t["time"], unit="ms").strftime("%H:%M:%S"),
+                        "Asset": symbol.replace("USDT", ""),
+                        "Tipo": "BUY 🟢" if not t["isBuyerMaker"] else "SELL 🔴",
+                        "Prezzo": f"${float(t['price']):,.2f}",
+                        "Valore ($)": f"${usd_val:,.0f}",
+                        "Taglia": f"{float(t['qty']):,.2f}"
+                    })
+    except Exception:
+        pass
+    return pd.DataFrame(trades)
 
 @st.cache_data(ttl=300)
 def fetch_fear_and_greed():
@@ -129,41 +151,41 @@ def fetch_fear_and_greed():
     except Exception:
         return 50, "Neutral"
 
-# --- CALCOLO INDICATORI QUANTITATIVI ---
-def compute_rsi(series: pd.Series, period: int = 14) -> float:
+# --- CALCOLO MATEMATICO INDICATORI ---
+def calculate_rsi_series(series: pd.Series, period: int = 14) -> float:
+    if len(series) < period + 1:
+        return 50.0
     delta = series.diff()
     gain = delta.clip(lower=0).ewm(alpha=1/period, min_periods=period, adjust=False).mean()
     loss = (-delta.clip(upper=0)).ewm(alpha=1/period, min_periods=period, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
-    return round(float(rsi.iloc[-1]), 1) if not np.isnan(rsi.iloc[-1]) else 50.0
+    val = float(rsi.iloc[-1])
+    return round(val, 1) if not np.isnan(val) else 50.0
 
-def analyze_multi_tf(symbol: str):
-    df_1h = fetch_candles(symbol, "1h", 60)
-    df_4h = fetch_candles(symbol, "4h", 40)
-    df_1d = fetch_candles(symbol, "1D", 40)
+def analyze_asset_confluence(item: dict):
+    df_1h = fetch_binance_klines(item["symbol"], "1h", 60)
+    df_4h = fetch_binance_klines(item["symbol"], "4h", 60)
+    df_1d = fetch_binance_klines(item["symbol"], "1d", 60)
 
     if df_1h is None or len(df_1h) < 25:
         return None
 
-    rsi_1h = compute_rsi(df_1h["close"])
-    rsi_4h = compute_rsi(df_4h["close"]) if df_4h is not None and len(df_4h) >= 15 else rsi_1h
-    rsi_1d = compute_rsi(df_1d["close"]) if df_1d is not None and len(df_1d) >= 15 else rsi_1h
+    # Calcolo Multi-TF RSI reale
+    rsi_1h = calculate_rsi_series(df_1h["close"])
+    rsi_4h = calculate_rsi_series(df_4h["close"]) if df_4h is not None else rsi_1h
+    rsi_1d = calculate_rsi_series(df_1d["close"]) if df_1d is not None else rsi_1h
 
-    closes, highs, lows, vols = df_1h["close"], df_1h["high"], df_1h["low"], df_1h["volumeto"]
+    closes, highs, lows = df_1h["close"], df_1h["high"], df_1h["low"]
 
     # ATR (14)
     tr = pd.concat([highs - lows, (highs - closes.shift(1)).abs(), (lows - closes.shift(1)).abs()], axis=1).max(axis=1)
     atr = float(tr.rolling(14).mean().iloc[-1])
 
-    # Squeeze
+    # Squeeze Indicator
     sma20 = closes.rolling(20).mean()
     std20 = closes.rolling(20).std()
-    bb_u = sma20 + (2.0 * std20)
-    bb_l = sma20 - (2.0 * std20)
-    kc_u = sma20 + (1.5 * tr.rolling(14).mean())
-    kc_l = sma20 - (1.5 * tr.rolling(14).mean())
-    squeeze_on = bool(bb_l.iloc[-1] > kc_l.iloc[-1] and bb_u.iloc[-1] < kc_u.iloc[-1])
+    squeeze_on = bool((sma20 - 2*std20).iloc[-1] > (sma20 - 1.5*atr).iloc[-1] and (sma20 + 2*std20).iloc[-1] < (sma20 + 1.5*atr).iloc[-1])
 
     # Trend & Slope
     ema7 = closes.ewm(span=7, adjust=False).mean()
@@ -171,9 +193,8 @@ def analyze_multi_tf(symbol: str):
     slope = ((ema7.iloc[-1] - ema7.iloc[-4]) / ema7.iloc[-4]) * 100 if len(df_1h) >= 5 else 0.0
     bullish = ema7.iloc[-1] >= ema25.iloc[-1]
 
-    # Z-Score Volume
-    v_mean, v_std = vols.tail(20).mean(), vols.tail(20).std()
-    z_score = (vols.iloc[-1] - v_mean) / v_std if v_std > 0 else 0.0
+    # Dati derivati reali
+    derivs = fetch_derivatives_data(item["symbol"])
 
     # Punteggio Confluenza
     score = 50
@@ -181,178 +202,151 @@ def analyze_multi_tf(symbol: str):
     score += 10 if slope > 0.4 else (-10 if slope < -0.4 else 0)
     if squeeze_on: score += 10
 
-    # Multi-TF RSI Confluence & Anti-FOMO Guard
+    # Filtri di salvaguardia Multi-TF & Anti-FOMO
     if rsi_1h >= 75 or rsi_4h >= 75:
-        score -= 25  # Taglio immediato per overbought
+        score -= 25  # Blocco categorico per iperestensione
     elif rsi_1h <= 30 and rsi_4h <= 35:
-        score += 25  # Forte confluenza di oversold
+        score += 25
     elif 42 <= rsi_1h <= 60 and bullish:
-        score += 15  # Ottimo punto di continuazione/pullback
+        score += 15
 
     score = max(5, min(95, score))
 
-    # Definizione Azione Chiara
+    # Definizione univoca del segnale
     if rsi_1h >= 76:
         action = "⚠️ PRENDI PROFITTO (RSI Esteso)"
         action_code = "TP"
     elif score >= 65 and rsi_1h < 70:
-        action = "🟢 COMPRA / LONG (Pullback)"
+        action = "🟢 ACCUMULA / LONG (Pullback)"
         action_code = "BUY"
-    elif score <= 35 and rsi_1h > 28:
+    elif score <= 35 and rsi_1h > 30:
         action = "🔴 VENDI / SHORT"
         action_code = "SELL"
     else:
         action = "💤 NEUTRALE / ATTENDI"
         action_code = "NEUTRAL"
 
-    grade = "GRADE A+" if score >= 75 else ("GRADE A" if score >= 60 else ("GRADE A-" if score <= 30 else "GRADE B"))
+    curr_p = float(closes.iloc[-1])
+
+    # Calcolo SL e TP logici in base alla direzione
+    if action_code == "SELL":
+        sl = curr_p + (1.5 * atr)
+        tp1 = curr_p - (2.0 * atr)
+        tp2 = curr_p - (3.5 * atr)
+    else:  # BUY, TP o NEUTRAL (assumendo bias principale)
+        sl = curr_p - (1.5 * atr)
+        tp1 = curr_p + (2.0 * atr)
+        tp2 = curr_p + (3.5 * atr)
 
     return {
-        "rsi_1h": rsi_1h, "rsi_4h": rsi_4h, "rsi_1d": rsi_1d,
-        "atr": atr, "squeeze": squeeze_on, "bullish": bullish, "slope": slope, "z_score": z_score,
-        "score": score, "grade": grade, "action": action, "action_code": action_code,
+        "name": item["name"],
+        "symbol": item["symbol"],
+        "tv_symbol": item["tv_symbol"],
+        "price": curr_p,
+        "fmt_price": f"${curr_p:,.2f}" if curr_p >= 1 else f"${curr_p:.4f}",
+        "rsi_1h": rsi_1h,
+        "rsi_4h": rsi_4h,
+        "rsi_1d": rsi_1d,
+        "atr": atr,
+        "slope": slope,
+        "squeeze": squeeze_on,
+        "score": score,
+        "action": action,
+        "action_code": action_code,
+        "sl": sl,
+        "tp1": tp1,
+        "tp2": tp2,
         "support": float(lows.tail(20).min()),
         "resistance": float(highs.tail(20).max()),
+        "open_interest": derivs["open_interest"],
+        "long_short_ratio": derivs["long_short_ratio"],
+        "funding_rate": derivs["funding_rate"],
         "df": df_1h
     }
 
-# --- CALCOLO MAPPE DI LIQUIDAZIONE & LIVELLI A LEVA ---
-def calculate_liquidation_clusters(current_price: float, atr: float):
-    """
-    Simula i pool di liquidazione (Long e Short) in base a 10x, 25x, 50x, 100x
-    con concentrazione di volume stimata attorno ai supporti e resistenze.
-    """
+# --- GENERATORE MAPPA DI LIQUIDAZIONE PONDERATA SULL'OPEN INTEREST ---
+def build_oi_liquidation_clusters(current_price: float, atr: float, oi_contracts: float, ls_ratio: float):
     leverages = [100, 50, 25, 10]
     clusters = []
+    
+    # Ripartizione dell'Open Interest totale su Long e Short in base al ratio
+    total_oi_usd = (oi_contracts * current_price) if oi_contracts > 0 else (current_price * 50000)
+    long_share = ls_ratio / (1 + ls_ratio)
+    short_share = 1.0 - long_share
 
     for lev in leverages:
-        # Long liquidation: prezzo scende e tocca il livello di margine
-        long_liq_dist = (1.0 / lev) * 0.90  # 90% del margine (considerando maintenance margin)
-        long_liq_price = current_price * (1 - long_liq_dist)
-        long_vol_est = (100 / lev) * 1.8 * (atr / current_price * 1000)
-
-        # Short liquidation: prezzo sale e tocca il livello di margine
-        short_liq_dist = (1.0 / lev) * 0.90
-        short_liq_price = current_price * (1 + short_liq_dist)
-        short_vol_est = (100 / lev) * 1.6 * (atr / current_price * 1000)
+        long_liq_price = current_price * (1.0 - (0.90 / lev))
+        short_liq_price = current_price * (1.0 + (0.90 / lev))
+        
+        # Volume stimato esposto a quella determinata fascia di leva
+        weight = (100 / lev) / 185.0
+        long_vol = (total_oi_usd * long_share * weight) / 1_000_000.0
+        short_vol = (total_oi_usd * short_share * weight) / 1_000_000.0
 
         clusters.append({
             "Leva": f"{lev}x",
             "Long Liq ($)": long_liq_price,
-            "Long Vol (M$)": round(long_vol_est, 2),
+            "Long Vol (M$)": round(long_vol, 2),
             "Short Liq ($)": short_liq_price,
-            "Short Vol (M$)": round(short_vol_est, 2)
+            "Short Vol (M$)": round(short_vol, 2)
         })
 
     return pd.DataFrame(clusters)
 
-# --- ARKHAM / ON-CHAIN FLUX ENGINE (FEED SIMULATO & API-READY) ---
-def get_arkham_whale_flows():
-    """
-    Feed dei movimenti on-chain delle balene (Whale CEX Inflows vs Outflows).
-    Pronto per collegamento Webhook/API di Arkham Intelligence.
-    """
-    flows = [
-        {"Orario": "10 min fa", "Asset": "BTC", "Tipo": "Outflow (Cold Wallet) 🟢", "Quantità": "1,450 BTC", "Valore": "$104.4M", "Impatto": "Bullish"},
-        {"Orario": "24 min fa", "Asset": "ETH", "Tipo": "Inflow (Coinbase) 🔴", "Quantità": "12,000 ETH", "Valore": "$27.8M", "Impatto": "Bearish"},
-        {"Orario": "45 min fa", "Asset": "SOL", "Tipo": "Outflow (Staking) 🟢", "Quantità": "180,000 SOL", "Valore": "$15.8M", "Impatto": "Bullish"},
-        {"Orario": "1h fa", "Asset": "BTC", "Tipo": "Inflow (Binance) 🔴", "Quantità": "850 BTC", "Valore": "$61.2M", "Impatto": "Bearish"}
-    ]
-    return pd.DataFrame(flows)
+# --- CARICAMENTO GLOBALE ---
+@st.cache_data(ttl=20)
+def load_all_market_data():
+    results = []
+    for asset in ASSETS:
+        res = analyze_asset_confluence(asset)
+        if res is not None:
+            results.append(res)
+    return results
 
-# --- RACCOLTA DATI GLOBALE ---
-@st.cache_data(ttl=25)
-def load_all_terminal_data():
-    dataset = []
-    for item in ASSETS:
-        q = analyze_multi_tf(item["name"])
-        if q is None:
-            continue
-        curr_price = float(q["df"]["close"].iloc[-1])
-        is_buy = q["action_code"] == "BUY"
-        sl_val = curr_price - (1.5 * q["atr"]) if is_buy else curr_price + (1.5 * q["atr"])
-        tp1_val = curr_price + (2.0 * q["atr"]) if is_buy else curr_price - (2.0 * q["atr"])
-        tp2_val = curr_price + (3.5 * q["atr"]) if is_buy else curr_price - (3.5 * q["atr"])
-
-        dataset.append({
-            "name": item["name"],
-            "pair": item["pair"],
-            "tv_symbol": item["tv_symbol"],
-            "price": curr_price,
-            "fmt_price": f"${curr_price:,.2f}" if curr_price >= 1 else f"${curr_price:.4f}",
-            "rsi_1h": q["rsi_1h"],
-            "rsi_4h": q["rsi_4h"],
-            "rsi_1d": q["rsi_1d"],
-            "atr": q["atr"],
-            "slope": q["slope"],
-            "z_score": q["z_score"],
-            "score": q["score"],
-            "grade": q["grade"],
-            "action": q["action"],
-            "action_code": q["action_code"],
-            "squeeze": q["squeeze"],
-            "bullish": q["bullish"],
-            "support": q["support"],
-            "resistance": q["resistance"],
-            "sl": sl_val,
-            "tp1": tp1_val,
-            "tp2": tp2_val,
-            "df": q["df"]
-        })
-    return dataset
-
-data_list = load_all_terminal_data()
+data_list = load_all_market_data()
 fng_score, fng_sentiment = fetch_fear_and_greed()
-avg_market_score = int(np.mean([x["score"] for x in data_list])) if data_list else 50
+avg_score = int(np.mean([x["score"] for x in data_list])) if data_list else 50
 
-# --- HEADER TOP STATS PER SMARTPHONE ---
-st.markdown("### ⚡ Apex Institutional Terminal")
-kpi1, kpi2, kpi3 = st.columns(3)
-kpi1.metric("Fear & Greed", f"{fng_score}/100", delta=fng_sentiment, delta_color="off")
-kpi2.metric("Apex Confluence", f"{avg_market_score}/100", delta="BULL" if avg_market_score >= 50 else "BEAR")
-active_sqz = sum(1 for x in data_list if x["squeeze"])
-kpi3.metric("Squeeze 1h", f"{active_sqz} Attivi", delta="Spike Imminente" if active_sqz > 0 else "Stabile", delta_color="inverse" if active_sqz > 0 else "normal")
+# --- HEADER STATS ---
+st.markdown("### ⚡ Apex Terminal Pro")
+k1, k2, k3 = st.columns(3)
+k1.metric("Fear & Greed", f"{fng_score}/100", delta=fng_sentiment, delta_color="off")
+k2.metric("Market Bias", f"{avg_score}/100", delta="BULLISH" if avg_score >= 50 else "BEARISH")
+sqz_count = sum(1 for x in data_list if x["squeeze"])
+k3.metric("Squeeze 1h", f"{sqz_count} Attivi", delta="Espansione Imminente" if sqz_count > 0 else "Neutro", delta_color="inverse" if sqz_count > 0 else "normal")
 
-# --- NAVIGAZIONE A TAB TOUCH-FRIENDLY ---
-tab_radar, tab_heat, tab_arkham, tab_calc, tab_chart, tab_night = st.tabs([
+# --- TAB TOUCH-FRIENDLY ---
+tab_radar, tab_heat, tab_whales, tab_calc, tab_tv = st.tabs([
     "⚡ Segnali & Multi-TF",
     "🔥 Mappe Liquidazione",
-    "🐋 Arkham Whale Flow",
+    "🐋 Scanner Balene (Live)",
     "🎯 Calcola Trade",
-    "📈 Grafici Live TV",
-    "🌙 Risk Guard"
+    "📈 TradingView Live"
 ])
 
 # ==========================================
-# TAB 1: SEGNALI & RSI MULTI-TIMEFRAME (1h, 4h, 1D)
+# TAB 1: RADAR MULTI-TIMEFRAME REALE
 # ==========================================
 with tab_radar:
-    col_f1, col_f2 = st.columns([1, 1])
-    with col_f1:
-        tf_display = st.selectbox("Visualizzazione Principale RSI:", ["1H (Scalping/Intraday)", "4H (Swing)", "1D (Macro)"], index=0)
-    with col_f2:
-        filter_type = st.radio("Filtro:", ["Tutti", "🟢 Buy", "🔴 Sell / TP", "⚡ Squeeze"], horizontal=True)
+    col_filter = st.radio("Filtra per:", ["Tutti", "🟢 Long Setup", "⚠️ Prendi Profitto / Short"], horizontal=True)
 
     for item in data_list:
-        if filter_type == "🟢 Buy" and item["action_code"] != "BUY":
+        if col_filter == "🟢 Long Setup" and item["action_code"] != "BUY":
             continue
-        if filter_type == "🔴 Sell / TP" and item["action_code"] not in ["SELL", "TP"]:
-            continue
-        if filter_type == "⚡ Squeeze" and not item["squeeze"]:
+        if col_filter == "⚠️ Prendi Profitto / Short" and item["action_code"] not in ["TP", "SELL"]:
             continue
 
         with st.container(border=True):
             h1, h2 = st.columns([3, 2])
-            h1.markdown(f"### {item['pair']}")
+            h1.markdown(f"### {item['name']}/USDT")
             h2.markdown(f"<h3 style='text-align:right;color:#00e5ff;'>{item['fmt_price']}</h3>", unsafe_allow_html=True)
 
-            # Segnale Operativo e Grado
-            st.markdown(f"**Segnale:** `{item['action']}` | **Score:** `{item['score']}/100` ({item['grade']})")
+            st.markdown(f"**Segnale:** `{item['action']}` | **Score:** `{item['score']}/100`")
             if item["squeeze"]:
-                st.warning("⚡ **Squeeze Attivo:** Compressione Bande/Keltner in corso.")
+                st.warning("⚡ **Squeeze Attivo:** Compressione Bande/Keltner rilevata su 1H.")
 
-            # Multi-Timeframe RSI Breakdown
-            st.markdown("**RSI Multi-Timeframe:**")
+            # Dati RSI 100% indipendenti
+            st.markdown("**RSI Multi-Timeframe (Feed Binance):**")
             r1, r2, r3 = st.columns(3)
             r1.metric("RSI 1H", f"{item['rsi_1h']}", delta="Overbought" if item['rsi_1h'] > 70 else ("Oversold" if item['rsi_1h'] < 30 else "Neutro"))
             r2.metric("RSI 4H", f"{item['rsi_4h']}", delta="Overbought" if item['rsi_4h'] > 70 else ("Oversold" if item['rsi_4h'] < 30 else "Neutro"))
@@ -366,145 +360,120 @@ with tab_radar:
             l3.markdown(f"🚀 **Target 2:**\n`${item['tp2']:,.2f}`" if item['tp2'] >= 1 else f"🚀 **Target 2:**\n`${item['tp2']:.4f}`")
 
 # ==========================================
-# TAB 2: MAPPE DI LIQUIDAZIONE & LIVELLI A LEVA
+# TAB 2: MAPPA LIQUIDAZIONI BASATA SU OPEN INTEREST
 # ==========================================
 with tab_heat:
-    st.markdown("##### 🔥 Liquidation Heatmap & Leverage Clusters")
+    st.markdown("##### 🔥 Liquidation Pools & Open Interest Heatmap")
     names = [d["name"] for d in data_list]
-    chosen_liq = st.selectbox("Seleziona Moneta per Mappa Liquidazioni:", names, index=0, key="liq_coin_select")
-    target_asset = next(d for d in data_list if d["name"] == chosen_liq)
+    chosen_asset = st.selectbox("Seleziona Moneta:", names, index=0)
+    asset_data = next(d for d in data_list if d["name"] == chosen_asset)
 
-    df_liq = calculate_liquidation_clusters(target_asset["price"], target_asset["atr"])
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Long/Short Ratio", f"{asset_data['long_short_ratio']:.2f}")
+    m2.metric("Funding Rate 8h", f"{asset_data['funding_rate']:.4f}%")
+    m3.metric("Open Interest", f"{asset_data['open_interest']:,.0f} Contratti")
 
-    # Grafico a barre orizzontali: Pool Liquidazioni Long vs Short
+    df_liq = build_oi_liquidation_clusters(
+        asset_data["price"], 
+        asset_data["atr"], 
+        asset_data["open_interest"], 
+        asset_data["long_short_ratio"]
+    )
+
     fig_liq = go.Figure()
-
-    # Short liquidations (sopra il prezzo corrente -> barre rosse)
     fig_liq.add_trace(go.Bar(
         y=df_liq["Leva"],
         x=df_liq["Short Vol (M$)"],
         orientation='h',
-        name='Short Liq (Liquidity Above)',
+        name='Short Liquidation (Sopra)',
         marker=dict(color='#ff1744'),
         text=[f"${p:,.2f}" if p >= 1 else f"${p:.4f}" for p in df_liq["Short Liq ($)"]],
-        textposition='auto'
+        textposition='inside'
     ))
-
-    # Long liquidations (sotto il prezzo corrente -> barre verdi)
     fig_liq.add_trace(go.Bar(
         y=df_liq["Leva"],
         x=[-v for v in df_liq["Long Vol (M$)"]],
         orientation='h',
-        name='Long Liq (Liquidity Below)',
+        name='Long Liquidation (Sotto)',
         marker=dict(color='#00e676'),
         text=[f"${p:,.2f}" if p >= 1 else f"${p:.4f}" for p in df_liq["Long Liq ($)"]],
-        textposition='auto'
+        textposition='inside'
     ))
 
     fig_liq.update_layout(
-        title=f"Mappa Pool Liquidazione per {chosen_liq} (Prezzo Corrente: {target_asset['fmt_price']})",
+        title=f"Zone di Caccia alla Liquidità ({chosen_asset})",
         barmode='overlay',
         paper_bgcolor='#06090e',
         plot_bgcolor='#0d131d',
         font=dict(color='#e2e8f0', size=11),
-        height=330,
-        margin=dict(l=10, r=10, t=40, b=20),
+        height=320,
+        margin=dict(l=10, r=10, t=35, b=15),
         xaxis=dict(showgrid=False, title="Volume Stimato Liquidabile (M$)"),
-        yaxis=dict(autorange="reversed")
+        yaxis=dict(autorange="reversed"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-    st.plotly_chart(fig_liq, use_container_width=True)
-
-    st.markdown("###### 📊 Tabella Dettaglio Livelli per Leva")
-    formatted_liq = df_liq.copy()
-    formatted_liq["Long Liq ($)"] = formatted_liq["Long Liq ($)"].apply(lambda x: f"${x:,.2f}" if x >= 1 else f"${x:.4f}")
-    formatted_liq["Short Liq ($)"] = formatted_liq["Short Liq ($)"].apply(lambda x: f"${x:,.2f}" if x >= 1 else f"${x:.4f}")
-    formatted_liq["Long Vol"] = formatted_liq["Long Vol (M$)"].apply(lambda x: f"${x:.1f}M")
-    formatted_liq["Short Vol"] = formatted_liq["Short Vol (M$)"].apply(lambda x: f"${x:.1f}M")
-    st.dataframe(formatted_liq[["Leva", "Long Liq ($)", "Long Vol", "Short Liq ($)", "Short Vol"]], use_container_width=True, hide_index=True)
+    st.plotly_chart(fig_liq, use_container_width=True, config={'displayModeBar': False})
 
 # ==========================================
-# TAB 3: ARKHAM INTELLIGENCE & WHALE TRACKER
+# TAB 3: SCANNER ORDINI BALENE IN TEMPO REALE
 # ==========================================
-with tab_arkham:
-    st.markdown("##### 🐋 Flussi Balene & Dati On-Chain (Stile Arkham)")
-    st.info("I grandi trasferimenti verso exchange anticipano dump; i deflussi (outflow) verso cold wallet indicano accumulazione.")
-
-    w1, w2 = st.columns(2)
-    w1.metric("Whale Bias 24h", "🟢 ACCUMULAZIONE", delta="+ $182.4M Net Outflow")
-    w2.metric("Depositi CEX Sospetti", "2 Grandi Wallet", delta="- $89.0M", delta_color="inverse")
-
-    df_arkham = get_arkham_whale_flows()
-    st.markdown("###### 🔍 Ultime Transazioni Grandi Wallet")
-    st.dataframe(df_arkham, use_container_width=True, hide_index=True)
-
-    with st.expander("⚙️ Configurazione API Arkham Intelligence"):
-        st.text_input("Arkham API Key:", type="password", placeholder="arkham_live_sk_...")
-        st.checkbox("Abilita Webhook Telegram per movimenti > $10M", value=True)
+with tab_whales:
+    st.markdown("##### 🐋 Tape Scanner Grandi Contratti (> $100,000)")
+    whale_coin = st.selectbox("Filtra per asset:", names, index=0, key="whale_sel")
+    w_sym = next(d["symbol"] for d in data_list if d["name"] == whale_coin)
+    
+    df_whales = fetch_real_whale_trades(w_sym, min_usd=100000.0)
+    if not df_whales.empty:
+        st.dataframe(df_whales, use_container_width=True, hide_index=True)
+    else:
+        st.info("Nessun singolo ordine istituzionale > $100k registrato negli ultimi blocchi.")
 
 # ==========================================
-# TAB 4: CALCOLATORE TRADE & POSITION SIZING
+# TAB 4: CALCOLATORE DI POSIZIONE
 # ==========================================
 with tab_calc:
-    st.markdown("##### 🎯 Dimensionamento Rischio & Position Sizing")
-    chosen_calc = st.selectbox("Seleziona Moneta per Trade:", names, index=0, key="calc_select")
-    cur_trade = next(d for d in data_list if d["name"] == chosen_calc)
+    st.markdown("##### 🎯 Dimensionamento Rischio Professionale")
+    trade_coin = st.selectbox("Seleziona Moneta:", names, index=0, key="calc_select")
+    cur_t = next(d for d in data_list if d["name"] == trade_coin)
 
-    cin1, cin2 = st.columns(2)
-    with cin1:
-        entry_price = st.number_input("Prezzo Entrata ($)", value=float(cur_trade["price"]), format="%.4f")
-        direction = st.selectbox("Direzione", ["LONG (Compra) 📈", "SHORT (Vendi) 📉"], index=0 if cur_trade["action_code"] == "BUY" else 1)
-    with cin2:
-        capital = st.number_input("Capitale Account ($)", value=2000.0, step=250.0)
-        risk_pct = st.number_input("Rischio Max (%)", value=1.0, min_value=0.2, max_value=5.0, step=0.1)
+    c1, c2 = st.columns(2)
+    with c1:
+        entry_p = st.number_input("Prezzo Entrata ($)", value=float(cur_t["price"]), format="%.4f")
+        trade_dir = st.selectbox("Direzione", ["LONG 📈", "SHORT 📉"], index=0 if cur_t["action_code"] == "BUY" else 1)
+    with c2:
+        acc_cap = st.number_input("Capitale Totale ($)", value=2000.0, step=100.0)
+        risk_pct = st.number_input("Rischio Max per Trade (%)", value=1.0, min_value=0.1, max_value=5.0, step=0.1)
 
-    is_l = "LONG" in direction
-    dist = cur_trade["atr"] * 1.5
-    sl_calc = entry_price - dist if is_l else entry_price + dist
-    loss_usd = capital * (risk_pct / 100.0)
-    units = loss_usd / dist if dist > 0 else 0
-    total_usd = units * entry_price
+    is_long = "LONG" in trade_dir
+    dist = cur_t["atr"] * 1.5
+    stop_p = entry_p - dist if is_long else entry_p + dist
+    loss_amount = acc_cap * (risk_pct / 100.0)
+    qty = loss_amount / dist if dist > 0 else 0
+    pos_val = qty * entry_p
 
     st.markdown("---")
     r1, r2 = st.columns(2)
-    r1.metric("Capitale Posizione", f"${total_usd:,.2f}")
-    r2.metric("Perdita Max a SL", f"-${loss_usd:,.2f}")
+    r1.metric("Valore Posizione", f"${pos_val:,.2f}")
+    r2.metric("Rischio Nominale", f"-${loss_amount:,.2f}")
 
     r3, r4 = st.columns(2)
-    r3.metric("Quantità Monete", f"{units:,.4f}")
-    r4.metric("Stop Loss Rigido", f"${sl_calc:,.4f}")
-
-    t1 = entry_price + (dist * 1.5) if is_l else entry_price - (dist * 1.5)
-    t2 = entry_price + (dist * 2.5) if is_l else entry_price - (dist * 2.5)
-    t3 = entry_price + (dist * 4.0) if is_l else entry_price - (dist * 4.0)
-
-    st.markdown("###### 🎯 Piani di Uscita e Take Profit")
-    tp_df = pd.DataFrame([
-        {"Target": "TP1 (Chiudi 50%)", "R:R": "1 : 1.5", "Prezzo": f"${t1:,.4f}", "Profitto": f"+${loss_usd * 1.5:,.2f}"},
-        {"Target": "TP2 (Chiudi 30%)", "R:R": "1 : 2.5", "Prezzo": f"${t2:,.4f}", "Profitto": f"+${loss_usd * 2.5:,.2f}"},
-        {"Target": "TP3 (Chiudi 20%)", "R:R": "1 : 4.0", "Prezzo": f"${t3:,.4f}", "Profitto": f"+${loss_usd * 4.0:,.2f}"}
-    ])
-    st.dataframe(tp_df, use_container_width=True, hide_index=True)
+    r3.metric("Quantità Coin", f"{qty:,.4f}")
+    r4.metric("Stop Loss Rigido", f"${stop_p:,.4f}")
 
 # ==========================================
-# TAB 5: GRAFICI LIVE TRADINGVIEW PER MOBILE
+# TAB 5: GRAFICI LIVE TRADINGVIEW
 # ==========================================
-with tab_chart:
-    st.markdown("##### 📈 Grafico TradingView Interattivo")
-    chart_choice = st.selectbox("Seleziona Moneta Grafico:", names, index=0, key="tv_select")
-    ch_item = next(d for d in data_list if d["name"] == chart_choice)
+with tab_tv:
+    chart_c = st.selectbox("Visualizza Grafico:", names, index=0, key="tv_select")
+    chart_meta = next(d for d in data_list if d["name"] == chart_c)
 
-    s1, s2 = st.columns(2)
-    s1.metric("Supporto 24h", f"${ch_item['support']:,.2f}" if ch_item['support'] >= 1 else f"${ch_item['support']:.4f}")
-    s2.metric("Resistenza 24h", f"${ch_item['resistance']:,.2f}" if ch_item['resistance'] >= 1 else f"${ch_item['resistance']:.4f}")
-
-    tv_html = f"""
-    <div style="height:380px;width:100%">
+    tv_code = f"""
+    <div style="height:420px;width:100%">
       <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
       <script type="text/javascript">
-      new TradingView.widget(
-      {{
+      new TradingView.widget({{
         "autosize": true,
-        "symbol": "{ch_item['tv_symbol']}",
+        "symbol": "{chart_meta['tv_symbol']}",
         "interval": "60",
         "timezone": "Europe/Rome",
         "theme": "dark",
@@ -516,31 +485,9 @@ with tab_chart:
         "hide_side_toolbar": true,
         "save_image": false,
         "container_id": "tv_widget"
-      }}
-      );
+      }});
       </script>
       <div id="tv_widget" style="height:100%;width:100%"></div>
     </div>
     """
-    components.html(tv_html, height=390)
-
-# ==========================================
-# TAB 6: RISK GUARD NOTTURNO
-# ==========================================
-with tab_night:
-    st.markdown("##### 🌙 Audit Salvacapitale Notturno")
-    sqz_coins = [d["name"] for d in data_list if d["squeeze"]]
-    if sqz_coins:
-        st.warning(f"⚠️ Compressione attiva su: **{', '.join(sqz_coins)}**. Rischio spike di volatilità notturna.")
-    else:
-        st.success("✅ Nessun squeeze anomalo rilevato. Mercato in volatilità standard.")
-
-    st.markdown("---")
-    c1 = st.checkbox("Stop Loss inserito per ogni posizione aperta", value=True)
-    c2 = st.checkbox("Rischio controllato (max 1-2% del capitale totale)", value=True)
-    c3 = st.checkbox("Notifiche Push attive sullo smartphone", value=True)
-
-    if c1 and c2 and c3:
-        st.success("🛡️ **RISK AUDIT SUPERATO:** Puoi lasciare il terminale attivo in sicurezza.")
-    else:
-        st.error("🚨 **RISCHIO ATTIVO:** Imposta gli Stop Loss sull'exchange prima di disconnetterti.")
+    components.html(tv_code, height=430)
