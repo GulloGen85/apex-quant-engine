@@ -1,3 +1,4 @@
+import concurrent.futures
 import textwrap
 import numpy as np
 import pandas as pd
@@ -125,16 +126,20 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ==============================================================================
-# 2. FETCHING SAFE (BYBIT + BINANCE + FALLBACK)
+# 2. FETCHING PARALLELO ULTRA-VELOCE
 # ==============================================================================
 
-@st.cache_data(ttl=15)
-def fetch_klines_safe(symbol: str, interval: str, limit: int = 150) -> pd.DataFrame:
+WATCHLIST = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
+    "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
+    "DOGEUSDT", "SUIUSDT", "NEARUSDT", "DOTUSDT"
+]
+
+def fetch_single_kline_fast(symbol: str, interval: str, limit: int = 150) -> pd.DataFrame:
     bybit_interval = {"1h": "60", "4h": "240", "1d": "D"}.get(interval, "60")
-    
     try:
         url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={symbol}&interval={bybit_interval}&limit={limit}"
-        res = requests.get(url, timeout=2)
+        res = requests.get(url, timeout=1.0)
         if res.status_code == 200:
             list_data = res.json().get("result", {}).get("list", [])
             if list_data:
@@ -148,7 +153,7 @@ def fetch_klines_safe(symbol: str, interval: str, limit: int = 150) -> pd.DataFr
 
     try:
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        res = requests.get(url, timeout=2)
+        res = requests.get(url, timeout=1.0)
         if res.status_code == 200:
             df = pd.DataFrame(res.json(), columns=[
                 "open_time", "open", "high", "low", "close", "volume",
@@ -160,7 +165,8 @@ def fetch_klines_safe(symbol: str, interval: str, limit: int = 150) -> pd.DataFr
     except Exception:
         pass
 
-    np.random.seed(hash(symbol) % 1000 + (1 if interval == "1h" else 5))
+    seed = (hash(symbol) + hash(interval)) % 10000
+    np.random.seed(seed)
     base_price = {"BTCUSDT": 78758.43, "ETHUSDT": 3150.0, "SOLUSDT": 185.0}.get(symbol, 50.0)
     returns = np.random.normal(0.0001, 0.004, limit)
     prices = base_price * np.exp(np.cumsum(returns))
@@ -169,11 +175,9 @@ def fetch_klines_safe(symbol: str, interval: str, limit: int = 150) -> pd.DataFr
         "low": prices * 0.997, "close": prices, "volume": np.random.uniform(50, 500, limit)
     })
 
-
-@st.cache_data(ttl=5)
-def fetch_ticker_safe(symbol: str) -> dict:
+def fetch_ticker_fast(symbol: str) -> dict:
     try:
-        res = requests.get(f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol}", timeout=2)
+        res = requests.get(f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol}", timeout=1.0)
         if res.status_code == 200:
             data = res.json().get("result", {}).get("list", [])
             if data:
@@ -186,9 +190,35 @@ def fetch_ticker_safe(symbol: str) -> dict:
     base_price = {"BTCUSDT": 78758.43, "ETHUSDT": 3150.0, "SOLUSDT": 185.0}.get(symbol, 50.0)
     return {"lastPrice": base_price, "priceChangePercent": 0.56}
 
+def load_symbol_pack(symbol: str) -> dict:
+    df_1h = fetch_single_kline_fast(symbol, "1h", 150)
+    df_4h = fetch_single_kline_fast(symbol, "4h", 150)
+    df_1d = fetch_single_kline_fast(symbol, "1d", 150)
+    ticker = fetch_ticker_fast(symbol)
+    return {
+        "symbol": symbol,
+        "df_1h": df_1h,
+        "df_4h": df_4h,
+        "df_1d": df_1d,
+        "ticker": ticker
+    }
+
+@st.cache_data(ttl=15, show_spinner=False)
+def fetch_all_market_data(symbols: list) -> dict:
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+        future_to_sym = {executor.submit(load_symbol_pack, sym): sym for sym in symbols}
+        for future in concurrent.futures.as_completed(future_to_sym):
+            sym = future_to_sym[future]
+            try:
+                results[sym] = future.result()
+            except Exception:
+                pass
+    return results
+
 
 # ==============================================================================
-# 3. MOTOR DI CALCOLO UNIFICATO PER 1H E 4H
+# 3. MOTOR DI CALCOLO INDICATORI BINANCE
 # ==============================================================================
 
 def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
@@ -201,7 +231,6 @@ def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 def compute_binance_indicators(df: pd.DataFrame):
-    """Calcola TUTTI gli indicatori dello screenshot su un dato dataframe (1H o 4H)."""
     close = df['close']
     high = df['high']
     low = df['low']
@@ -216,7 +245,8 @@ def compute_binance_indicators(df: pd.DataFrame):
     rsi_max = rsi14.rolling(14).max()
     stoch = (rsi14 - rsi_min) / (rsi_max - rsi_min + 1e-10) * 100
     stoch_k = round(stoch.rolling(3).mean().iloc[-1], 2)
-    stoch_d = round(stoch_k if pd.isna(stoch.rolling(3).mean().rolling(3).mean().iloc[-1]) else stoch.rolling(3).mean().rolling(3).mean().iloc[-1], 2)
+    stoch_d_val = stoch.rolling(3).mean().rolling(3).mean().iloc[-1]
+    stoch_d = round(stoch_k if pd.isna(stoch_d_val) else stoch_d_val, 2)
 
     # 3. MACD (12, 26, 9)
     ema12 = close.ewm(span=12, adjust=False).mean()
@@ -247,9 +277,7 @@ def compute_binance_indicators(df: pd.DataFrame):
 
     # 8. VOLUMI & DELTA VOLUME %
     v_base = vol.iloc[-1]
-    v_quote_m = (vol * close).iloc[-1] / 1e6
     v_ma5 = vol.rolling(5).mean().iloc[-1]
-    v_ma10 = vol.rolling(10).mean().iloc[-1]
     delta_vol_pct = ((v_base - v_ma5) / (v_ma5 + 1e-10)) * 100
 
     return {
@@ -258,12 +286,12 @@ def compute_binance_indicators(df: pd.DataFrame):
         "ma7": ma7, "ma25": ma25, "ma99": ma99, "ema7": ema7, "ema25": ema25, "ema99": ema99,
         "boll_up": boll_up, "boll_mb": boll_mb, "boll_dn": boll_dn,
         "st_val": round(st_val, 2), "st_bull": st_bull, "sar_val": round(sar_val, 2),
-        "v_base": v_base, "v_quote_m": v_quote_m, "v_ma5": v_ma5, "v_ma10": v_ma10, "delta_vol": round(delta_vol_pct, 1)
+        "v_base": v_base, "delta_vol": round(delta_vol_pct, 1)
     }
 
 
 # ==============================================================================
-# 4. CONTROLLI UI E WATCHLIST
+# 4. INTERFACCIA UTENTE & CONTROLLI
 # ==============================================================================
 
 col_nav1, col_nav2, col_nav3 = st.columns(3)
@@ -292,27 +320,26 @@ if show_risk:
     pos_size = risk_usd / (sl_pct / 100) if sl_pct > 0 else 0
     st.info(f"💡 Rischio Max: **${risk_usd:.2f}** | Size Posizione Suggerita: **${pos_size:.2f}**")
 
-WATCHLIST = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
-    "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
-    "DOGEUSDT", "SUIUSDT", "NEARUSDT", "DOTUSDT"
-]
+with st.spinner("⚡ Caricamento dati di mercato (1H & 4H)..."):
+    all_data = fetch_all_market_data(WATCHLIST)
 
 if show_matrix:
     st.markdown("### 📊 Confluence Matrix Overview (1H vs 4H)")
     matrix_rows = []
     for sym in WATCHLIST[:6]:
-        d1 = fetch_klines_safe(sym, "1h", limit=50)
-        d4 = fetch_klines_safe(sym, "4h", limit=50)
-        r1 = round(calc_rsi(d1["close"], 6).iloc[-1], 1)
-        r4 = round(calc_rsi(d4["close"], 6).iloc[-1], 1)
-        matrix_rows.append({
-            "Asset": sym.replace("USDT", "/USDT"),
-            "RSI(6) 1H": r1,
-            "RSI(6) 4H": r4,
-            "Confluenza": "🟢 DOUBLE BUY" if (r1 < 35 and r4 < 40) else ("🔴 DOUBLE SHORT" if (r1 > 65 and r4 > 60) else "🟡 MIXED / RANGE")
-        })
-    st.table(pd.DataFrame(matrix_rows))
+        if sym in all_data:
+            d1 = all_data[sym]["df_1h"]
+            d4 = all_data[sym]["df_4h"]
+            r1 = round(calc_rsi(d1["close"], 6).iloc[-1], 1)
+            r4 = round(calc_rsi(d4["close"], 6).iloc[-1], 1)
+            matrix_rows.append({
+                "Asset": sym.replace("USDT", "/USDT"),
+                "RSI(6) 1H": r1,
+                "RSI(6) 4H": r4,
+                "Confluenza": "🟢 DOUBLE BUY" if (r1 < 35 and r4 < 40) else ("🔴 DOUBLE SHORT" if (r1 > 65 and r4 > 60) else "🟡 MIXED / RANGE")
+            })
+    if matrix_rows:
+        st.table(pd.DataFrame(matrix_rows))
 
 st.markdown("<div class='filter-header'>Filtro Segnali Confluenza:</div>", unsafe_allow_html=True)
 filtro_segnale = st.radio(
@@ -325,16 +352,19 @@ filtro_segnale = st.radio(
 
 
 # ==============================================================================
-# 5. RENDER CRYPTO CARDS (ANALISI COMPLETA 1H & 4H)
+# 5. CARDS CRYPTO CON DOPPIO TIMEFRAME (1H & 4H)
 # ==============================================================================
 
 for symbol in WATCHLIST:
-    df_1h = fetch_klines_safe(symbol, "1h", 150)
-    df_4h = fetch_klines_safe(symbol, "4h", 150)
-    df_1d = fetch_klines_safe(symbol, "1d", 150)
-    ticker = fetch_ticker_safe(symbol)
+    if symbol not in all_data:
+        continue
+    
+    pack = all_data[symbol]
+    df_1h = pack["df_1h"]
+    df_4h = pack["df_4h"]
+    df_1d = pack["df_1d"]
+    ticker = pack["ticker"]
 
-    # Calcolo di TUTTI gli indicatori su ENTRAMBI i timeframe
     i1h = compute_binance_indicators(df_1h)
     i4h = compute_binance_indicators(df_4h)
     rsi_1d = round(calc_rsi(df_1d["close"], 14).iloc[-1], 1)
@@ -345,7 +375,6 @@ for symbol in WATCHLIST:
     change_str = f"({change_val:+.2f}%)"
     change_class = "price-change-up" if change_val >= 0 else "price-change-down"
 
-    # Logica Confluenza Multi-Timeframe (1H & 4H)
     if i1h["rsi6"] > 70 and i4h["rsi6"] > 60:
         signal_type = "Short"
         badge_status = "🔴 HIGH CONFLUENCE SHORT (1H + 4H)"
@@ -376,7 +405,7 @@ for symbol in WATCHLIST:
             <div class="price-box">
                 <div class="price-val">{price_str}</div>
                 <div class="{change_class}">{change_str}</div>
-                <div style="font-size:11px; color:#8b949e; margin-top:2px;">RSI 1D (Trend Giorno): <strong style="color:#ffffff;">{rsi_1d}</strong></div>
+                <div style="font-size:11px; color:#8b949e; margin-top:2px;">RSI 1D (Daily Trend): <strong style="color:#ffffff;">{rsi_1d}</strong></div>
             </div>
         </div>
 
