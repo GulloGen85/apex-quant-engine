@@ -1,5 +1,4 @@
 import concurrent.futures
-import textwrap
 import numpy as np
 import pandas as pd
 import requests
@@ -69,18 +68,19 @@ CUSTOM_CSS = """
         margin-bottom: 12px;
     }
     .ticker-title {
-        font-size: 22px;
+        font-size: 20px;
         font-weight: 800;
         color: #ffffff;
         letter-spacing: 0.5px;
+        margin-right: 8px;
     }
 
-    .badge-range { background-color: rgba(217, 119, 6, 0.15); color: #f59e0b; border: 1px solid #f59e0b; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; }
-    .badge-buy { background-color: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid #4ade80; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; }
-    .badge-short { background-color: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid #f87171; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; }
+    .badge-range { background-color: rgba(217, 119, 6, 0.15); color: #f59e0b; border: 1px solid #f59e0b; font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; text-transform: uppercase; display: inline-block; white-space: nowrap; }
+    .badge-buy { background-color: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid #4ade80; font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; text-transform: uppercase; display: inline-block; white-space: nowrap; }
+    .badge-short { background-color: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid #f87171; font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; text-transform: uppercase; display: inline-block; white-space: nowrap; }
 
     .price-box { text-align: right; }
-    .price-val { color: #38bdf8; font-size: 22px; font-weight: 800; line-height: 1.1; }
+    .price-val { color: #38bdf8; font-size: 20px; font-weight: 800; line-height: 1.1; }
     .price-change-up { color: #4ade80; font-size: 13px; font-weight: 600; margin-top: 2px; }
     .price-change-down { color: #f87171; font-size: 13px; font-weight: 600; margin-top: 2px; }
 
@@ -89,8 +89,8 @@ CUSTOM_CSS = """
         font-weight: 800;
         color: #f59e0b;
         text-transform: uppercase;
-        margin: 12px 0 6px 0;
-        padding-bottom: 3px;
+        margin: 14px 0 8px 0;
+        padding-bottom: 4px;
         border-bottom: 1px dashed #30363d;
     }
 
@@ -115,7 +115,7 @@ CUSTOM_CSS = """
         padding: 8px 10px;
     }
     .ind-label { color: #8b949e; font-size: 10px; font-weight: 700; text-transform: uppercase; }
-    .ind-val { color: #ffffff; font-size: 13px; font-weight: 700; margin: 2px 0; }
+    .ind-val { color: #ffffff; font-size: 12px; font-weight: 700; margin: 2px 0; }
     
     .ind-sub-red { color: #f87171; font-size: 10px; font-weight: 600; }
     .ind-sub-green { color: #4ade80; font-size: 10px; font-weight: 600; }
@@ -236,10 +236,8 @@ def compute_binance_indicators(df: pd.DataFrame):
     low = df['low']
     vol = df['volume']
 
-    # 1. RSI(6)
     rsi6 = round(calc_rsi(close, period=6).iloc[-1], 1)
 
-    # 2. STOCHRSI & MASTOCHRSI
     rsi14 = calc_rsi(close, period=14)
     rsi_min = rsi14.rolling(14).min()
     rsi_max = rsi14.rolling(14).max()
@@ -248,34 +246,28 @@ def compute_binance_indicators(df: pd.DataFrame):
     stoch_d_val = stoch.rolling(3).mean().rolling(3).mean().iloc[-1]
     stoch_d = round(stoch_k if pd.isna(stoch_d_val) else stoch_d_val, 2)
 
-    # 3. MACD (12, 26, 9)
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
     dif = ema12 - ema26
     dea = dif.ewm(span=9, adjust=False).mean()
     macd_h = (dif - dea) * 2
 
-    # 4. EMA & MA (7, 25, 99)
     ma7, ma25, ma99 = close.rolling(7).mean().iloc[-1], close.rolling(25).mean().iloc[-1], close.rolling(99).mean().iloc[-1]
     ema7, ema25, ema99 = close.ewm(span=7, adjust=False).mean().iloc[-1], close.ewm(span=25, adjust=False).mean().iloc[-1], close.ewm(span=99, adjust=False).mean().iloc[-1]
 
-    # 5. BOLLINGER (20, 2)
     sma20 = close.rolling(20).mean()
     std20 = close.rolling(20).std()
     boll_up = (sma20 + 2 * std20).iloc[-1]
     boll_mb = sma20.iloc[-1]
     boll_dn = (sma20 - 2 * std20).iloc[-1]
 
-    # 6. SUPERTREND (10, 3)
     tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
     atr = tr.ewm(span=10, adjust=False).mean()
     st_val = ((high + low) / 2 + (3 * atr)).iloc[-1]
     st_bull = close.iloc[-1] > st_val
 
-    # 7. SAR (0.02, 0.2)
     sar_val = (low.iloc[-1] * 0.995) if close.iloc[-1] > close.iloc[-2] else (high.iloc[-1] * 1.005)
 
-    # 8. VOLUMI & DELTA VOLUME %
     v_base = vol.iloc[-1]
     v_ma5 = vol.rolling(5).mean().iloc[-1]
     delta_vol_pct = ((v_base - v_ma5) / (v_ma5 + 1e-10)) * 100
@@ -395,138 +387,141 @@ for symbol in WATCHLIST:
 
     coin_name = symbol.replace("USDT", "")
 
-    card_html = textwrap.dedent(f"""
-    <div class="crypto-card">
-        <div class="card-header">
-            <div>
-                <span class="ticker-title">{coin_name}/USDT</span>
-                <span class="{badge_class}">{badge_status}</span>
-            </div>
-            <div class="price-box">
-                <div class="price-val">{price_str}</div>
-                <div class="{change_class}">{change_str}</div>
-                <div style="font-size:11px; color:#8b949e; margin-top:2px;">RSI 1D (Daily Trend): <strong style="color:#ffffff;">{rsi_1d}</strong></div>
-            </div>
-        </div>
+    # Costruzione HTML pulita senza spaziatura iniziale per evitare che Streamlit crei blocchi di codice
+    raw_html = f"""
+<div class="crypto-card">
+<div class="card-header">
+<div>
+<span class="ticker-title">{coin_name}/USDT</span>
+<span class="{badge_class}">{badge_status}</span>
+</div>
+<div class="price-box">
+<div class="price-val">{price_str}</div>
+<div class="{change_class}">{change_str}</div>
+<div style="font-size:11px; color:#8b949e; margin-top:2px;">RSI 1D (Daily Trend): <strong style="color:#ffffff;">{rsi_1d}</strong></div>
+</div>
+</div>
 
-        <!-- TIMEFRAME 1H -->
-        <div class="tf-header">⚡ TIMEFRAME 1 ORA (1H BINANCE)</div>
-        <div class="ind-grid-3">
-            <div class="ind-item">
-                <div class="ind-label">RSI (6) 1H</div>
-                <div class="ind-val">{i1h['rsi6']}</div>
-                <div class="ind-sub-{'red' if i1h['rsi6'] > 70 else ('green' if i1h['rsi6'] < 30 else 'yellow')}">
-                    {'🎯 Overbought' if i1h['rsi6'] > 70 else ('🟢 Oversold' if i1h['rsi6'] < 30 else '🟡 Neutral')}
-                </div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">STOCHRSI 1H</div>
-                <div class="ind-val">K:{i1h['stoch_k']} | D:{i1h['stoch_d']}</div>
-                <div class="ind-sub-{'red' if i1h['stoch_k'] > 80 else ('green' if i1h['stoch_k'] < 20 else 'yellow')}">
-                    {'🎯 Short' if i1h['stoch_k'] > 80 else ('🟢 Buy' if i1h['stoch_k'] < 20 else '🟡 Neutral')}
-                </div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">DELTA VOL % 1H</div>
-                <div class="ind-val">{i1h['delta_vol']:+.1f}%</div>
-                <div class="ind-sub-{'green' if i1h['delta_vol'] >= 0 else 'red'}">
-                    {'🟢 Vol Spike' if i1h['delta_vol'] >= 0 else '🔴 Low Vol'}
-                </div>
-            </div>
-        </div>
-        <div class="ind-grid-3">
-            <div class="ind-item">
-                <div class="ind-label">MACD 1H</div>
-                <div class="ind-val">DIF:{i1h['dif']} | DEA:{i1h['dea']}</div>
-                <div class="ind-sub-{'green' if i1h['macd_h'] >= 0 else 'red'}">Hist: {i1h['macd_h']}</div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">EMA (7/25/99) 1H</div>
-                <div class="ind-val" style="font-size: 11px;">
-                    {i1h['ema7']:,.1f} / {i1h['ema25']:,.1f} / {i1h['ema99']:,.1f}
-                </div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">MA (7/25/99) 1H</div>
-                <div class="ind-val" style="font-size: 11px;">
-                    {i1h['ma7']:,.1f} / {i1h['ma25']:,.1f} / {i1h['ma99']:,.1f}
-                </div>
-            </div>
-        </div>
-        <div class="ind-grid-2">
-            <div class="ind-item">
-                <div class="ind-label">BOLLINGER (20,2) 1H</div>
-                <div class="ind-val" style="font-size: 11px;">
-                    UP: {i1h['boll_up']:,.2f} | MB: {i1h['boll_mb']:,.2f} | DN: {i1h['boll_dn']:,.2f}
-                </div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">SUPERTREND & SAR 1H</div>
-                <div class="ind-val" style="font-size: 11px;">
-                    ST: {i1h['st_val']} ({'🟢' if i1h['st_bull'] else '🔴'}) | SAR: {i1h['sar_val']}
-                </div>
-            </div>
-        </div>
+<div class="tf-header">⚡ TIMEFRAME 1 ORA (1H BINANCE)</div>
+<div class="ind-grid-3">
+<div class="ind-item">
+<div class="ind-label">RSI (6) 1H</div>
+<div class="ind-val">{i1h['rsi6']}</div>
+<div class="ind-sub-{'red' if i1h['rsi6'] > 70 else ('green' if i1h['rsi6'] < 30 else 'yellow')}">
+{'🎯 Overbought' if i1h['rsi6'] > 70 else ('🟢 Oversold' if i1h['rsi6'] < 30 else '🟡 Neutral')}
+</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">STOCHRSI 1H</div>
+<div class="ind-val">K:{i1h['stoch_k']} | D:{i1h['stoch_d']}</div>
+<div class="ind-sub-{'red' if i1h['stoch_k'] > 80 else ('green' if i1h['stoch_k'] < 20 else 'yellow')}">
+{'🎯 Short' if i1h['stoch_k'] > 80 else ('🟢 Buy' if i1h['stoch_k'] < 20 else '🟡 Neutral')}
+</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">DELTA VOL % 1H</div>
+<div class="ind-val">{i1h['delta_vol']:+.1f}%</div>
+<div class="ind-sub-{'green' if i1h['delta_vol'] >= 0 else 'red'}">
+{'🟢 Vol Spike' if i1h['delta_vol'] >= 0 else '🔴 Low Vol'}
+</div>
+</div>
+</div>
 
-        <!-- TIMEFRAME 4H -->
-        <div class="tf-header">📊 TIMEFRAME 4 ORE (4H BINANCE)</div>
-        <div class="ind-grid-3">
-            <div class="ind-item">
-                <div class="ind-label">RSI (6) 4H</div>
-                <div class="ind-val">{i4h['rsi6']}</div>
-                <div class="ind-sub-{'red' if i4h['rsi6'] > 70 else ('green' if i4h['rsi6'] < 30 else 'yellow')}">
-                    {'🎯 Overbought' if i4h['rsi6'] > 70 else ('🟢 Oversold' if i4h['rsi6'] < 30 else '🟡 Neutral')}
-                </div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">STOCHRSI 4H</div>
-                <div class="ind-val">K:{i4h['stoch_k']} | D:{i4h['stoch_d']}</div>
-                <div class="ind-sub-{'red' if i4h['stoch_k'] > 80 else ('green' if i4h['stoch_k'] < 20 else 'yellow')}">
-                    {'🎯 Short' if i4h['stoch_k'] > 80 else ('🟢 Buy' if i4h['stoch_k'] < 20 else '🟡 Neutral')}
-                </div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">DELTA VOL % 4H</div>
-                <div class="ind-val">{i4h['delta_vol']:+.1f}%</div>
-                <div class="ind-sub-{'green' if i4h['delta_vol'] >= 0 else 'red'}">
-                    {'🟢 Vol Spike' if i4h['delta_vol'] >= 0 else '🔴 Low Vol'}
-                </div>
-            </div>
-        </div>
-        <div class="ind-grid-3">
-            <div class="ind-item">
-                <div class="ind-label">MACD 4H</div>
-                <div class="ind-val">DIF:{i4h['dif']} | DEA:{i4h['dea']}</div>
-                <div class="ind-sub-{'green' if i4h['macd_h'] >= 0 else 'red'}">Hist: {i4h['macd_h']}</div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">EMA (7/25/99) 4H</div>
-                <div class="ind-val" style="font-size: 11px;">
-                    {i4h['ema7']:,.1f} / {i4h['ema25']:,.1f} / {i4h['ema99']:,.1f}
-                </div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">MA (7/25/99) 4H</div>
-                <div class="ind-val" style="font-size: 11px;">
-                    {i4h['ma7']:,.1f} / {i4h['ma25']:,.1f} / {i4h['ma99']:,.1f}
-                </div>
-            </div>
-        </div>
-        <div class="ind-grid-2">
-            <div class="ind-item">
-                <div class="ind-label">BOLLINGER (20,2) 4H</div>
-                <div class="ind-val" style="font-size: 11px;">
-                    UP: {i4h['boll_up']:,.2f} | MB: {i4h['boll_mb']:,.2f} | DN: {i4h['boll_dn']:,.2f}
-                </div>
-            </div>
-            <div class="ind-item">
-                <div class="ind-label">SUPERTREND & SAR 4H</div>
-                <div class="ind-val" style="font-size: 11px;">
-                    ST: {i4h['st_val']} ({'🟢' if i4h['st_bull'] else '🔴'}) | SAR: {i4h['sar_val']}
-                </div>
-            </div>
-        </div>
-    </div>
-    """)
+<div class="ind-grid-3">
+<div class="ind-item">
+<div class="ind-label">MACD 1H</div>
+<div class="ind-val">DIF:{i1h['dif']} | DEA:{i1h['dea']}</div>
+<div class="ind-sub-{'green' if i1h['macd_h'] >= 0 else 'red'}">Hist: {i1h['macd_h']}</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">EMA (7/25/99) 1H</div>
+<div class="ind-val" style="font-size: 11px;">
+{i1h['ema7']:,.1f} / {i1h['ema25']:,.1f} / {i1h['ema99']:,.1f}
+</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">MA (7/25/99) 1H</div>
+<div class="ind-val" style="font-size: 11px;">
+{i1h['ma7']:,.1f} / {i1h['ma25']:,.1f} / {i1h['ma99']:,.1f}
+</div>
+</div>
+</div>
 
-    st.markdown(card_html, unsafe_allow_html=True)
+<div class="ind-grid-2">
+<div class="ind-item">
+<div class="ind-label">BOLLINGER (20,2) 1H</div>
+<div class="ind-val" style="font-size: 11px;">
+UP: {i1h['boll_up']:,.2f} | MB: {i1h['boll_mb']:,.2f} | DN: {i1h['boll_dn']:,.2f}
+</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">SUPERTREND & SAR 1H</div>
+<div class="ind-val" style="font-size: 11px;">
+ST: {i1h['st_val']} ({'🟢' if i1h['st_bull'] else '🔴'}) | SAR: {i1h['sar_val']}
+</div>
+</div>
+</div>
+
+<div class="tf-header">📊 TIMEFRAME 4 ORE (4H BINANCE)</div>
+<div class="ind-grid-3">
+<div class="ind-item">
+<div class="ind-label">RSI (6) 4H</div>
+<div class="ind-val">{i4h['rsi6']}</div>
+<div class="ind-sub-{'red' if i4h['rsi6'] > 70 else ('green' if i4h['rsi6'] < 30 else 'yellow')}">
+{'🎯 Overbought' if i4h['rsi6'] > 70 else ('🟢 Oversold' if i4h['rsi6'] < 30 else '🟡 Neutral')}
+</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">STOCHRSI 4H</div>
+<div class="ind-val">K:{i4h['stoch_k']} | D:{i4h['stoch_d']}</div>
+<div class="ind-sub-{'red' if i4h['stoch_k'] > 80 else ('green' if i4h['stoch_k'] < 20 else 'yellow')}">
+{'🎯 Short' if i4h['stoch_k'] > 80 else ('🟢 Buy' if i4h['stoch_k'] < 20 else '🟡 Neutral')}
+</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">DELTA VOL % 4H</div>
+<div class="ind-val">{i4h['delta_vol']:+.1f}%</div>
+<div class="ind-sub-{'green' if i4h['delta_vol'] >= 0 else 'red'}">
+{'🟢 Vol Spike' if i4h['delta_vol'] >= 0 else '🔴 Low Vol'}
+</div>
+</div>
+</div>
+
+<div class="ind-grid-3">
+<div class="ind-item">
+<div class="ind-label">MACD 4H</div>
+<div class="ind-val">DIF:{i4h['dif']} | DEA:{i4h['dea']}</div>
+<div class="ind-sub-{'green' if i4h['macd_h'] >= 0 else 'red'}">Hist: {i4h['macd_h']}</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">EMA (7/25/99) 4H</div>
+<div class="ind-val" style="font-size: 11px;">
+{i4h['ema7']:,.1f} / {i4h['ema25']:,.1f} / {i4h['ema99']:,.1f}
+</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">MA (7/25/99) 4H</div>
+<div class="ind-val" style="font-size: 11px;">
+{i4h['ma7']:,.1f} / {i4h['ma25']:,.1f} / {i4h['ma99']:,.1f}
+</div>
+</div>
+</div>
+
+<div class="ind-grid-2">
+<div class="ind-item">
+<div class="ind-label">BOLLINGER (20,2) 4H</div>
+<div class="ind-val" style="font-size: 11px;">
+UP: {i4h['boll_up']:,.2f} | MB: {i4h['boll_mb']:,.2f} | DN: {i4h['boll_dn']:,.2f}
+</div>
+</div>
+<div class="ind-item">
+<div class="ind-label">SUPERTREND & SAR 4H</div>
+<div class="ind-val" style="font-size: 11px;">
+ST: {i4h['st_val']} ({'🟢' if i4h['st_bull'] else '🔴'}) | SAR: {i4h['sar_val']}
+</div>
+</div>
+</div>
+</div>
+"""
+    clean_html = "\n".join(line.strip() for line in raw_html.splitlines())
+    st.markdown(clean_html, unsafe_allow_html=True)
