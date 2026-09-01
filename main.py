@@ -4,25 +4,37 @@ import requests
 import streamlit as st
 
 # ==============================================================================
-# 1. IMPOSTA QUI LA TUA LISTA DI MONETE PREFERITE
+# 1. LISTA UFFICIALE DELLE 21 MONETE DAI TUOI SCREENSHOT (NO MONETE EXTRA)
 # ==============================================================================
-# Inserisci le tue coppie preferite esattamente come sono su Binance (es. "BTCUSDT")
 MY_FAVORITE_COINS = [
-    "BTCUSDT",
-    "ETHUSDT",
-    "SOLUSDT",
-    "DOGEUSDT",
-    "XRPUSDT",
-    "SUIUSDT",
-    "NEARUSDT",
-    "PEPEUSDT"
+    "HYPEUSDT",
+    "BTCUSDC",
+    "KASUSDT",
+    "NEARUSDC",
+    "ETHUSDC",
+    "FETUSDC",
+    "XRPUSDC",
+    "SOLUSDC",
+    "BNBUSDC",
+    "BCHUSDC",
+    "LINKUSDC",
+    "AAVEUSDC",
+    "ZECUSDC",
+    "RENDERUSDC",
+    "TAOUSDC",
+    "AKTUSDT",
+    "ONDOUSDC",
+    "SUIUSDC",
+    "WLDUSDC",
+    "INJUSDC",
+    "ENAUSDC"
 ]
 
 # ==============================================================================
-# 2. CONFIGURAZIONE STREAMLIT & STILE PROFESSIONAL DARK
+# 2. CONFIGURAZIONE STREAMLIT & LAYOUT
 # ==============================================================================
 st.set_page_config(
-    page_title="Binance MTF Live Screener - Professional Edition",
+    page_title="Screener Binance Live - Lista Personale",
     page_icon="⚡",
     layout="centered",
     initial_sidebar_state="expanded",
@@ -130,24 +142,21 @@ CUSTOM_CSS = """
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-
 # ==============================================================================
-# 3. SIDEBAR & WATCHLIST UTENTE
+# 3. SIDEBAR WATCHLIST
 # ==============================================================================
-st.sidebar.markdown("### ⚙️ La tua Watchlist")
+st.sidebar.markdown("### ⚙️ Le tue Preferite")
 user_input_coins = st.sidebar.text_area(
-    "Coppie USDT da monitorare:",
+    "Coppie attive:",
     value=", ".join(MY_FAVORITE_COINS),
-    height=150
+    height=200
 )
 WATCHLIST = [c.strip().upper() for c in user_input_coins.split(",") if c.strip()]
 
-
 # ==============================================================================
-# 4. UTILITY FORMATTAZIONE PRECISIONE DECIMALi
+# 4. FORMATTAZIONE DECIMALi DINAMICA
 # ==============================================================================
 def fmt_price(val):
-    """Gestisce la precisione decimale dinamica per evitare valori schiacciati."""
     if val is None or pd.isna(val):
         return "N/A"
     abs_v = abs(val)
@@ -160,9 +169,8 @@ def fmt_price(val):
     else:
         return f"{val:.7f}"
 
-
 # ==============================================================================
-# 5. MOTORE DISSOCIAZIONE GEOBLOCK API BINANCE (100% DATI REALI)
+# 5. RETRIEVAL DATI REAL-TIME DA BINANCE (SPOT & FUTURES DUAL-ROUTING)
 # ==============================================================================
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -170,8 +178,9 @@ HTTP_HEADERS = {
 
 def fetch_binance_klines(symbol: str, interval: str, limit: int = 150) -> pd.DataFrame:
     endpoints = [
-        f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
-        f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
+        f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}",
+        f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     ]
     for url in endpoints:
         try:
@@ -192,18 +201,20 @@ def fetch_binance_klines(symbol: str, interval: str, limit: int = 150) -> pd.Dat
 
 def fetch_binance_ticker(symbol: str) -> dict:
     endpoints = [
-        f"https://data-api.binance.vision/api/v3/ticker/24hr?symbol={symbol}",
-        f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}"
+        f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}",
+        f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}",
+        f"https://data-api.binance.vision/api/v3/ticker/24hr?symbol={symbol}"
     ]
     for url in endpoints:
         try:
             res = requests.get(url, headers=HTTP_HEADERS, timeout=3.5)
             if res.status_code == 200:
                 data = res.json()
-                return {
-                    "lastPrice": float(data["lastPrice"]),
-                    "priceChangePercent": float(data["priceChangePercent"])
-                }
+                if isinstance(data, dict) and "lastPrice" in data:
+                    return {
+                        "lastPrice": float(data["lastPrice"]),
+                        "priceChangePercent": float(data["priceChangePercent"])
+                    }
         except Exception:
             continue
     return {}
@@ -234,7 +245,7 @@ def load_coin_pack(symbol: str):
 @st.cache_data(ttl=10, show_spinner=False)
 def fetch_all_coins_data(symbols: list) -> dict:
     results = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(load_coin_pack, sym): sym for sym in symbols}
         for future in concurrent.futures.as_completed(futures):
             sym = futures[future]
@@ -246,9 +257,8 @@ def fetch_all_coins_data(symbols: list) -> dict:
                 pass
     return results
 
-
 # ==============================================================================
-# 6. CALCOLO INDICATORI TECNICI & ANALISI TRADING
+# 6. CALCOLO MATEMATICO INDICATORI TECNICI
 # ==============================================================================
 def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
@@ -260,6 +270,9 @@ def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 def compute_indicators(df: pd.DataFrame):
+    if len(df) < 30:
+        return None
+        
     close, high, low, vol = df['close'], df['high'], df['low'], df['volume']
 
     rsi6 = round(calc_rsi(close, period=6).iloc[-1], 1)
@@ -268,9 +281,10 @@ def compute_indicators(df: pd.DataFrame):
     rsi_min = rsi14.rolling(14).min()
     rsi_max = rsi14.rolling(14).max()
     stoch = (rsi14 - rsi_min) / (rsi_max - rsi_min + 1e-10) * 100
-    stoch_k = round(stoch.rolling(3).mean().iloc[-1], 2)
+    stoch_k_val = stoch.rolling(3).mean().iloc[-1]
     stoch_d_val = stoch.rolling(3).mean().rolling(3).mean().iloc[-1]
-    stoch_d = round(stoch_k if pd.isna(stoch_d_val) else stoch_d_val, 2)
+    stoch_k = round(stoch_k_val, 2) if not pd.isna(stoch_k_val) else 0.0
+    stoch_d = round(stoch_d_val, 2) if not pd.isna(stoch_d_val) else stoch_k
 
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
@@ -278,69 +292,74 @@ def compute_indicators(df: pd.DataFrame):
     dea = dif.ewm(span=9, adjust=False).mean()
     macd_h = (dif - dea) * 2
 
-    ma7, ma25, ma99 = close.rolling(7).mean().iloc[-1], close.rolling(25).mean().iloc[-1], close.rolling(99).mean().iloc[-1]
-    ema7, ema25, ema99 = close.ewm(span=7, adjust=False).mean().iloc[-1], close.ewm(span=25, adjust=False).mean().iloc[-1], close.ewm(span=99, adjust=False).mean().iloc[-1]
+    ma7_v = close.rolling(7).mean().iloc[-1] if len(df) >= 7 else None
+    ma25_v = close.rolling(25).mean().iloc[-1] if len(df) >= 25 else None
+    ma99_v = close.rolling(99).mean().iloc[-1] if len(df) >= 99 else None
+
+    ema7_v = close.ewm(span=7, adjust=False).mean().iloc[-1]
+    ema25_v = close.ewm(span=25, adjust=False).mean().iloc[-1]
+    ema99_v = close.ewm(span=99, adjust=False).mean().iloc[-1]
 
     sma20 = close.rolling(20).mean()
     std20 = close.rolling(20).std()
-    boll_up = (sma20 + 2 * std20).iloc[-1]
-    boll_mb = sma20.iloc[-1]
-    boll_dn = (sma20 - 2 * std20).iloc[-1]
+    boll_up = (sma20 + 2 * std20).iloc[-1] if len(df) >= 20 else None
+    boll_mb = sma20.iloc[-1] if len(df) >= 20 else None
+    boll_dn = (sma20 - 2 * std20).iloc[-1] if len(df) >= 20 else None
 
     tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
     atr = tr.ewm(span=10, adjust=False).mean()
     st_val = ((high + low) / 2 + (3 * atr)).iloc[-1]
-    st_bull = close.iloc[-1] > st_val
+    st_bull = close.iloc[-1] > st_val if not pd.isna(st_val) else True
 
-    sar_val = (low.iloc[-1] * 0.995) if close.iloc[-1] > close.iloc[-2] else (high.iloc[-1] * 1.005)
+    sar_val = (low.iloc[-1] * 0.995) if close.iloc[-1] >= close.iloc[-2] else (high.iloc[-1] * 1.005)
 
     v_base = vol.iloc[-1]
-    v_ma5 = vol.rolling(5).mean().iloc[-1]
+    v_ma5 = vol.rolling(5).mean().iloc[-1] if len(df) >= 5 else v_base
     delta_vol_pct = ((v_base - v_ma5) / (v_ma5 + 1e-10)) * 100
 
     return {
         "raw_close": close.iloc[-1],
-        "rsi6": rsi6, "stoch_k": stoch_k, "stoch_d": stoch_d,
-        "dif": fmt_price(dif.iloc[-1]), "dea": fmt_price(dea.iloc[-1]), "macd_h": fmt_price(macd_h.iloc[-1]),
+        "rsi6": rsi6, 
+        "stoch_k": stoch_k, 
+        "stoch_d": stoch_d,
+        "dif": fmt_price(dif.iloc[-1]), 
+        "dea": fmt_price(dea.iloc[-1]), 
+        "macd_h": fmt_price(macd_h.iloc[-1]),
         "raw_macd_h": macd_h.iloc[-1],
-        "ma7": fmt_price(ma7), "ma25": fmt_price(ma25), "ma99": fmt_price(ma99),
-        "ema7": fmt_price(ema7), "ema25": fmt_price(ema25), "ema99": fmt_price(ema99),
-        "raw_ema7": ema7, "raw_ema25": ema25,
+        "ma7": fmt_price(ma7_v), "ma25": fmt_price(ma25_v), "ma99": fmt_price(ma99_v),
+        "ema7": fmt_price(ema7_v), "ema25": fmt_price(ema25_v), "ema99": fmt_price(ema99_v),
+        "raw_ema7": ema7_v, "raw_ema25": ema25_v,
         "boll_up": fmt_price(boll_up), "boll_mb": fmt_price(boll_mb), "boll_dn": fmt_price(boll_dn),
         "st_val": fmt_price(st_val), "st_bull": st_bull, "sar_val": fmt_price(sar_val),
         "delta_vol": round(delta_vol_pct, 1)
     }
 
 def generate_simple_analysis(i1h, i4h, rsi_1d):
-    """Genera un riassunto tecnico operativo chiaro."""
     bullets = []
-    
-    # Confluenza Trend EMA
     if i1h["raw_ema7"] > i1h["raw_ema25"] and i4h["raw_ema7"] > i4h["raw_ema25"]:
-        bullets.append("• **Trend**: Struttura fortemente rialzista su 1H e 4H (EMA7 > EMA25).")
+        bullets.append("• **Trend**: Struttura rialzista allineata su 1H e 4H (EMA7 > EMA25).")
     elif i1h["raw_ema7"] < i1h["raw_ema25"] and i4h["raw_ema7"] < i4h["raw_ema25"]:
         bullets.append("• **Trend**: Pressione ribassista su entrambi i timeframe.")
     else:
-        bullets.append("• **Trend**: Fase laterale / di transizione (confluenza mista tra 1H e 4H).")
+        bullets.append("• **Trend**: Fase laterale / di consolidamento (confluenza mista tra 1H e 4H).")
 
-    # Condizione RSI
     if i1h["rsi6"] < 30 and i4h["rsi6"] < 40:
-        bullets.append("• **RSI**: Ipervenduto critico su 1H e 4H -> Possibile estensione di pulback o ingresso long a basso rischio.")
+        bullets.append("• **RSI**: Ipervenduto su 1H e 4H -> Potenziale area di rimbalzo Long.")
     elif i1h["rsi6"] > 70 and i4h["rsi6"] > 60:
-        bullets.append("• **RSI**: Ipercomprato marcato -> Attenzione a prese di beneficio o possibili pattern Short/Take Profit.")
+        bullets.append("• **RSI**: Ipercomprato marcato -> Possibile fase di ritracciamento / Short.")
     else:
-        bullets.append(f"• **RSI**: Valori di RSI neutri (1H: {i1h['rsi6']} | Daily: {rsi_1d}).")
+        bullets.append(f"• **RSI**: Valori neutri (1H: {i1h['rsi6']} | 1D: {rsi_1d}).")
 
-    # Volumi
     if i1h["delta_vol"] > 20:
-        bullets.append(f"• **Volumi**: Spike volumetrico attivo in 1H (+{i1h['delta_vol']}% sopra la media a 5 periodi).")
+        bullets.append(f"• **Volumi**: Incremento volumetrico significativo su 1H (+{i1h['delta_vol']}% vs media 5 p).")
 
     return " <br> ".join(bullets)
 
+# ==============================================================================
+# 7. DASHBOARD E FILTRI
+# ==============================================================================
+st.title("⚡ Binance MTF Live Screener")
 
-# ==============================================================================
-# 7. INTERFACCIA E DASHBOARD COMPLETA
-# ==============================================================================
 col_n1, col_n2, col_n3 = st.columns(3)
 with col_n1:
     show_whales = st.checkbox("🐋 Whales Tape", value=False)
@@ -371,7 +390,7 @@ with st.spinner("⚡ Connessione streaming Binance Live..."):
     all_data = fetch_all_coins_data(WATCHLIST)
 
 if not all_data:
-    st.error("⚠️ Nessun dato disponibile. Verifica che i simboli inseriti siano validi su Binance (es. BTCUSDT).")
+    st.error("⚠️ Nessun dato scaricato. Verifica la connessione di rete.")
     st.stop()
 
 if show_matrix:
@@ -383,8 +402,9 @@ if show_matrix:
             d4 = all_data[sym]["df_4h"]
             r1 = round(calc_rsi(d1["close"], 6).iloc[-1], 1)
             r4 = round(calc_rsi(d4["close"], 6).iloc[-1], 1)
+            display_name = sym.replace("USDT", "").replace("USDC", "") + (" (Perp)" if "USDT" in sym else " (Spot)")
             matrix_rows.append({
-                "Asset": sym.replace("USDT", "/USDT"),
+                "Asset": display_name,
                 "RSI(6) 1H": r1,
                 "RSI(6) 4H": r4,
                 "Stato Confluenza": "🟢 DOUBLE BUY" if (r1 < 35 and r4 < 40) else ("🔴 DOUBLE SHORT" if (r1 > 65 and r4 > 60) else "🟡 NEUTRALE / RANGE")
@@ -401,9 +421,8 @@ filtro_segnale = st.radio(
     label_visibility="collapsed"
 )
 
-
 # ==============================================================================
-# 8. SCHEDE MONETE & ANALISI
+# 8. RENDERING DELLE SCHEDE MONETE
 # ==============================================================================
 for symbol in WATCHLIST:
     if symbol not in all_data:
@@ -414,6 +433,10 @@ for symbol in WATCHLIST:
 
     i1h = compute_indicators(df_1h)
     i4h = compute_indicators(df_4h)
+    
+    if not i1h or not i4h:
+        continue
+
     rsi_1d = round(calc_rsi(df_1d["close"], 14).iloc[-1], 1) if not df_1d.empty else 50.0
 
     price_val = float(ticker.get("lastPrice", 0))
@@ -434,14 +457,16 @@ for symbol in WATCHLIST:
     if filtro_segnale == "Solo Segnali Short 🔴" and signal_type != "Short":
         continue
 
-    coin_name = symbol.replace("USDT", "")
+    quote = "USDC" if "USDC" in symbol else "USDT"
+    base = symbol.replace("USDC", "").replace("USDT", "")
+    pair_label = f"{base}/{quote}"
     analysis_text = generate_simple_analysis(i1h, i4h, rsi_1d)
 
     raw_html = f"""
 <div class="crypto-card">
 <div class="card-header">
 <div>
-<span class="ticker-title">{coin_name}/USDT</span>
+<span class="ticker-title">{pair_label}</span>
 <span class="{badge_class}">{badge_status}</span>
 </div>
 <div class="price-box">
