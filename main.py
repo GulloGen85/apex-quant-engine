@@ -1,5 +1,4 @@
 import concurrent.futures
-import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
@@ -8,7 +7,7 @@ import streamlit as st
 # 1. CONFIGURAZIONE STREAMLIT & STILE DARK PRO
 # ==============================================================================
 st.set_page_config(
-    page_title="Binance MTF Full Screener (1H & 4H)",
+    page_title="Binance MTF Live Screener Real-Time",
     page_icon="⚡",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -126,7 +125,7 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ==============================================================================
-# 2. FETCHING PARALLELO ULTRA-VELOCE
+# 2. CONNETTORE LIVE API (SOLO DATI REALI DA EXCHANGE)
 # ==============================================================================
 
 WATCHLIST = [
@@ -135,11 +134,34 @@ WATCHLIST = [
     "DOGEUSDT", "SUIUSDT", "NEARUSDT", "DOTUSDT"
 ]
 
+# Intestazione HTTP reale per evitare che Binance/Bybit blocchino le chiamate da AWS/Streamlit
+HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+}
+
 def fetch_single_kline_fast(symbol: str, interval: str, limit: int = 150) -> pd.DataFrame:
+    # 1. TENTATIVO BINANCE
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        res = requests.get(url, headers=HTTP_HEADERS, timeout=3.0)
+        if res.status_code == 200:
+            data = res.json()
+            if isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data, columns=[
+                    "open_time", "open", "high", "low", "close", "volume",
+                    "close_time", "qav", "num_trades", "tbb", "tbq", "ignore"
+                ])
+                for col in ["open", "high", "low", "close", "volume"]:
+                    df[col] = df[col].astype(float)
+                return df
+    except Exception:
+        pass
+
+    # 2. FALLBACK SU BYBIT (SE BINANCE BLOCCA L'IP DI STREAMLIT)
     bybit_interval = {"1h": "60", "4h": "240", "1d": "D"}.get(interval, "60")
     try:
         url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={symbol}&interval={bybit_interval}&limit={limit}"
-        res = requests.get(url, timeout=1.0)
+        res = requests.get(url, headers=HTTP_HEADERS, timeout=3.0)
         if res.status_code == 200:
             list_data = res.json().get("result", {}).get("list", [])
             if list_data:
@@ -151,33 +173,22 @@ def fetch_single_kline_fast(symbol: str, interval: str, limit: int = 150) -> pd.
     except Exception:
         pass
 
+    # Se entrambe le API falliscono, restituisce un DataFrame vuoto (MAI DATI FINTI)
+    return pd.DataFrame()
+
+def fetch_ticker_fast(symbol: str) -> dict:
+    # 1. BINANCE TICKER
     try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        res = requests.get(url, timeout=1.0)
+        res = requests.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}", headers=HTTP_HEADERS, timeout=3.0)
         if res.status_code == 200:
-            df = pd.DataFrame(res.json(), columns=[
-                "open_time", "open", "high", "low", "close", "volume",
-                "close_time", "qav", "num_trades", "tbb", "tbq", "ignore"
-            ])
-            for col in ["open", "high", "low", "close", "volume"]:
-                df[col] = df[col].astype(float)
-            return df
+            data = res.json()
+            return {"lastPrice": float(data["lastPrice"]), "priceChangePercent": float(data["priceChangePercent"])}
     except Exception:
         pass
 
-    seed = (hash(symbol) + hash(interval)) % 10000
-    np.random.seed(seed)
-    base_price = {"BTCUSDT": 78758.43, "ETHUSDT": 3150.0, "SOLUSDT": 185.0}.get(symbol, 50.0)
-    returns = np.random.normal(0.0001, 0.004, limit)
-    prices = base_price * np.exp(np.cumsum(returns))
-    return pd.DataFrame({
-        "open": prices * 0.999, "high": prices * 1.003,
-        "low": prices * 0.997, "close": prices, "volume": np.random.uniform(50, 500, limit)
-    })
-
-def fetch_ticker_fast(symbol: str) -> dict:
+    # 2. BYBIT TICKER
     try:
-        res = requests.get(f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol}", timeout=1.0)
+        res = requests.get(f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol}", headers=HTTP_HEADERS, timeout=3.0)
         if res.status_code == 200:
             data = res.json().get("result", {}).get("list", [])
             if data:
@@ -187,14 +198,25 @@ def fetch_ticker_fast(symbol: str) -> dict:
                 return {"lastPrice": last_price, "priceChangePercent": change_pct}
     except Exception:
         pass
-    base_price = {"BTCUSDT": 78758.43, "ETHUSDT": 3150.0, "SOLUSDT": 185.0}.get(symbol, 50.0)
-    return {"lastPrice": base_price, "priceChangePercent": 0.56}
 
-def load_symbol_pack(symbol: str) -> dict:
+    return None
+
+def load_symbol_pack(symbol: str):
     df_1h = fetch_single_kline_fast(symbol, "1h", 150)
     df_4h = fetch_single_kline_fast(symbol, "4h", 150)
     df_1d = fetch_single_kline_fast(symbol, "1d", 150)
     ticker = fetch_ticker_fast(symbol)
+
+    # Se le API non hanno restituito i dati reali del grafico, scarta il simbolo
+    if df_1h.empty or df_4h.empty:
+        return None
+
+    if ticker is None or ticker["lastPrice"] == 0:
+        ticker = {
+            "lastPrice": float(df_1h["close"].iloc[-1]),
+            "priceChangePercent": 0.0
+        }
+
     return {
         "symbol": symbol,
         "df_1h": df_1h,
@@ -203,22 +225,24 @@ def load_symbol_pack(symbol: str) -> dict:
         "ticker": ticker
     }
 
-@st.cache_data(ttl=15, show_spinner=False)
+@st.cache_data(ttl=10, show_spinner=False)
 def fetch_all_market_data(symbols: list) -> dict:
     results = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         future_to_sym = {executor.submit(load_symbol_pack, sym): sym for sym in symbols}
         for future in concurrent.futures.as_completed(future_to_sym):
             sym = future_to_sym[future]
             try:
-                results[sym] = future.result()
+                pack = future.result()
+                if pack is not None:
+                    results[sym] = pack
             except Exception:
                 pass
     return results
 
 
 # ==============================================================================
-# 3. MOTOR DI CALCOLO INDICATORI BINANCE
+# 3. MOTOR DI CALCOLO INDICATORI REALI
 # ==============================================================================
 
 def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
@@ -312,8 +336,12 @@ if show_risk:
     pos_size = risk_usd / (sl_pct / 100) if sl_pct > 0 else 0
     st.info(f"💡 Rischio Max: **${risk_usd:.2f}** | Size Posizione Suggerita: **${pos_size:.2f}**")
 
-with st.spinner("⚡ Caricamento dati di mercato (1H & 4H)..."):
+with st.spinner("⚡ Connessione alle API degli Exchange per dati LIVE..."):
     all_data = fetch_all_market_data(WATCHLIST)
+
+if not all_data:
+    st.error("⚠️ Nessun dato di mercato disponibile. Le API degli exchange non hanno risposto o sono temporaneamente irraggiungibili da questo server.")
+    st.stop()
 
 if show_matrix:
     st.markdown("### 📊 Confluence Matrix Overview (1H vs 4H)")
@@ -344,7 +372,7 @@ filtro_segnale = st.radio(
 
 
 # ==============================================================================
-# 5. CARDS CRYPTO CON DOPPIO TIMEFRAME (1H & 4H)
+# 5. CARDS CRYPTO LIVE
 # ==============================================================================
 
 for symbol in WATCHLIST:
@@ -359,7 +387,7 @@ for symbol in WATCHLIST:
 
     i1h = compute_binance_indicators(df_1h)
     i4h = compute_binance_indicators(df_4h)
-    rsi_1d = round(calc_rsi(df_1d["close"], 14).iloc[-1], 1)
+    rsi_1d = round(calc_rsi(df_1d["close"], 14).iloc[-1], 1) if not df_1d.empty else 50.0
 
     price_val = float(ticker.get("lastPrice", 0))
     change_val = float(ticker.get("priceChangePercent", 0))
@@ -387,7 +415,6 @@ for symbol in WATCHLIST:
 
     coin_name = symbol.replace("USDT", "")
 
-    # Costruzione HTML pulita senza spaziatura iniziale per evitare che Streamlit crei blocchi di codice
     raw_html = f"""
 <div class="crypto-card">
 <div class="card-header">
