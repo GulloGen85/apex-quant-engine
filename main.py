@@ -4,13 +4,28 @@ import requests
 import streamlit as st
 
 # ==============================================================================
-# 1. CONFIGURAZIONE STREAMLIT & STILE DARK PRO COMPLETO
+# 1. IMPOSTA QUI LA TUA LISTA DI MONETE PREFERITE
+# ==============================================================================
+# Inserisci le tue coppie preferite esattamente come sono su Binance (es. "BTCUSDT")
+MY_FAVORITE_COINS = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "DOGEUSDT",
+    "XRPUSDT",
+    "SUIUSDT",
+    "NEARUSDT",
+    "PEPEUSDT"
+]
+
+# ==============================================================================
+# 2. CONFIGURAZIONE STREAMLIT & STILE PROFESSIONAL DARK
 # ==============================================================================
 st.set_page_config(
-    page_title="Binance MTF Live Screener Real-Time",
+    page_title="Binance MTF Live Screener - Professional Edition",
     page_icon="⚡",
     layout="centered",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 CUSTOM_CSS = """
@@ -20,7 +35,6 @@ CUSTOM_CSS = """
         color: #c9d1d9;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-
     div[data-testid="stCheckbox"] {
         background-color: #161b22;
         padding: 8px 14px;
@@ -32,25 +46,22 @@ CUSTOM_CSS = """
         font-weight: 600;
         font-size: 13px;
     }
-
     .filter-header {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 700;
         color: #ffffff;
         margin-top: 15px;
         margin-bottom: 10px;
     }
-
     div[data-testid="stRadio"] > label { display: none; }
     div[data-testid="stRadio"] > div {
         flex-direction: row;
-        gap: 12px;
+        gap: 10px;
         background-color: #161b22;
         padding: 8px 12px;
         border-radius: 8px;
         border: 1px solid #30363d;
     }
-
     .crypto-card {
         background-color: #161b22;
         border: 1px solid #30363d;
@@ -59,7 +70,6 @@ CUSTOM_CSS = """
         margin-bottom: 24px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.4);
     }
-
     .card-header {
         display: flex;
         justify-content: space-between;
@@ -67,24 +77,21 @@ CUSTOM_CSS = """
         margin-bottom: 12px;
     }
     .ticker-title {
-        font-size: 20px;
+        font-size: 22px;
         font-weight: 800;
         color: #ffffff;
         letter-spacing: 0.5px;
         margin-right: 8px;
     }
-
     .badge-range { background-color: rgba(217, 119, 6, 0.15); color: #f59e0b; border: 1px solid #f59e0b; font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; text-transform: uppercase; display: inline-block; white-space: nowrap; }
     .badge-buy { background-color: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid #4ade80; font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; text-transform: uppercase; display: inline-block; white-space: nowrap; }
     .badge-short { background-color: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid #f87171; font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; text-transform: uppercase; display: inline-block; white-space: nowrap; }
-
     .price-box { text-align: right; }
     .price-val { color: #38bdf8; font-size: 20px; font-weight: 800; line-height: 1.1; }
     .price-change-up { color: #4ade80; font-size: 13px; font-weight: 600; margin-top: 2px; }
     .price-change-down { color: #f87171; font-size: 13px; font-weight: 600; margin-top: 2px; }
-
     .tf-header {
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 800;
         color: #f59e0b;
         text-transform: uppercase;
@@ -92,59 +99,80 @@ CUSTOM_CSS = """
         padding-bottom: 4px;
         border-bottom: 1px dashed #30363d;
     }
-
-    .ind-grid-3 {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 8px;
-        margin-bottom: 8px;
-    }
-
-    .ind-grid-2 {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-        margin-bottom: 8px;
-    }
-
-    .ind-item {
-        background-color: #0d1117;
-        border: 1px solid #21262d;
-        border-radius: 8px;
-        padding: 8px 10px;
-    }
+    .ind-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+    .ind-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 8px; }
+    .ind-item { background-color: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 8px 10px; }
     .ind-label { color: #8b949e; font-size: 10px; font-weight: 700; text-transform: uppercase; }
     .ind-val { color: #ffffff; font-size: 12px; font-weight: 700; margin: 2px 0; }
-    
     .ind-sub-red { color: #f87171; font-size: 10px; font-weight: 600; }
     .ind-sub-green { color: #4ade80; font-size: 10px; font-weight: 600; }
     .ind-sub-yellow { color: #f59e0b; font-size: 10px; font-weight: 600; }
+    
+    .analysis-box {
+        background-color: #090d13;
+        border: 1px solid #1f2937;
+        border-left: 4px solid #38bdf8;
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-top: 12px;
+        font-size: 12px;
+        color: #d1d5db;
+        line-height: 1.4;
+    }
+    .analysis-title {
+        font-weight: 800;
+        color: #38bdf8;
+        text-transform: uppercase;
+        font-size: 11px;
+        margin-bottom: 4px;
+    }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ==============================================================================
-# 2. CONNETTORE LIVE API BINANCE (DATI REALI - NO GEOBLOCK)
+# 3. SIDEBAR & WATCHLIST UTENTE
 # ==============================================================================
+st.sidebar.markdown("### ⚙️ La tua Watchlist")
+user_input_coins = st.sidebar.text_area(
+    "Coppie USDT da monitorare:",
+    value=", ".join(MY_FAVORITE_COINS),
+    height=150
+)
+WATCHLIST = [c.strip().upper() for c in user_input_coins.split(",") if c.strip()]
 
-WATCHLIST = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
-    "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
-    "DOGEUSDT", "SUIUSDT", "NEARUSDT", "DOTUSDT"
-]
 
+# ==============================================================================
+# 4. UTILITY FORMATTAZIONE PRECISIONE DECIMALi
+# ==============================================================================
+def fmt_price(val):
+    """Gestisce la precisione decimale dinamica per evitare valori schiacciati."""
+    if val is None or pd.isna(val):
+        return "N/A"
+    abs_v = abs(val)
+    if abs_v >= 1000:
+        return f"{val:,.2f}"
+    elif abs_v >= 1:
+        return f"{val:,.3f}"
+    elif abs_v >= 0.001:
+        return f"{val:.5f}"
+    else:
+        return f"{val:.7f}"
+
+
+# ==============================================================================
+# 5. MOTORE DISSOCIAZIONE GEOBLOCK API BINANCE (100% DATI REALI)
+# ==============================================================================
 HTTP_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
 
-def fetch_single_kline_fast(symbol: str, interval: str, limit: int = 150) -> pd.DataFrame:
-    """Richiede candele reali usando endpoint Binance non soggetti a blocchi geografici AWS."""
+def fetch_binance_klines(symbol: str, interval: str, limit: int = 150) -> pd.DataFrame:
     endpoints = [
         f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
         f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
     ]
-    
     for url in endpoints:
         try:
             res = requests.get(url, headers=HTTP_HEADERS, timeout=3.5)
@@ -160,11 +188,9 @@ def fetch_single_kline_fast(symbol: str, interval: str, limit: int = 150) -> pd.
                     return df
         except Exception:
             continue
-
     return pd.DataFrame()
 
-def fetch_ticker_fast(symbol: str) -> dict:
-    """Recupera il prezzo dal vivo e la variazione percentuale 24h."""
+def fetch_binance_ticker(symbol: str) -> dict:
     endpoints = [
         f"https://data-api.binance.vision/api/v3/ticker/24hr?symbol={symbol}",
         f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}"
@@ -182,11 +208,11 @@ def fetch_ticker_fast(symbol: str) -> dict:
             continue
     return {}
 
-def load_symbol_pack(symbol: str):
-    df_1h = fetch_single_kline_fast(symbol, "1h", 150)
-    df_4h = fetch_single_kline_fast(symbol, "4h", 150)
-    df_1d = fetch_single_kline_fast(symbol, "1d", 150)
-    ticker = fetch_ticker_fast(symbol)
+def load_coin_pack(symbol: str):
+    df_1h = fetch_binance_klines(symbol, "1h", 150)
+    df_4h = fetch_binance_klines(symbol, "4h", 150)
+    df_1d = fetch_binance_klines(symbol, "1d", 150)
+    ticker = fetch_binance_ticker(symbol)
 
     if df_1h.empty or df_4h.empty:
         return None
@@ -206,12 +232,12 @@ def load_symbol_pack(symbol: str):
     }
 
 @st.cache_data(ttl=10, show_spinner=False)
-def fetch_all_market_data(symbols: list) -> dict:
+def fetch_all_coins_data(symbols: list) -> dict:
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_sym = {executor.submit(load_symbol_pack, sym): sym for sym in symbols}
-        for future in concurrent.futures.as_completed(future_to_sym):
-            sym = future_to_sym[future]
+        futures = {executor.submit(load_coin_pack, sym): sym for sym in symbols}
+        for future in concurrent.futures.as_completed(futures):
+            sym = futures[future]
             try:
                 pack = future.result()
                 if pack is not None:
@@ -222,9 +248,8 @@ def fetch_all_market_data(symbols: list) -> dict:
 
 
 # ==============================================================================
-# 3. MOTORE DI CALCOLO INDICATORI REALI
+# 6. CALCOLO INDICATORI TECNICI & ANALISI TRADING
 # ==============================================================================
-
 def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -234,11 +259,8 @@ def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     rs = ema_gain / (ema_loss + 1e-10)
     return 100 - (100 / (1 + rs))
 
-def compute_binance_indicators(df: pd.DataFrame):
-    close = df['close']
-    high = df['high']
-    low = df['low']
-    vol = df['volume']
+def compute_indicators(df: pd.DataFrame):
+    close, high, low, vol = df['close'], df['high'], df['low'], df['volume']
 
     rsi6 = round(calc_rsi(close, period=6).iloc[-1], 1)
 
@@ -277,29 +299,58 @@ def compute_binance_indicators(df: pd.DataFrame):
     delta_vol_pct = ((v_base - v_ma5) / (v_ma5 + 1e-10)) * 100
 
     return {
+        "raw_close": close.iloc[-1],
         "rsi6": rsi6, "stoch_k": stoch_k, "stoch_d": stoch_d,
-        "dif": round(dif.iloc[-1], 2), "dea": round(dea.iloc[-1], 2), "macd_h": round(macd_h.iloc[-1], 2),
-        "ma7": ma7, "ma25": ma25, "ma99": ma99, "ema7": ema7, "ema25": ema25, "ema99": ema99,
-        "boll_up": boll_up, "boll_mb": boll_mb, "boll_dn": boll_dn,
-        "st_val": round(st_val, 2), "st_bull": st_bull, "sar_val": round(sar_val, 2),
-        "v_base": v_base, "delta_vol": round(delta_vol_pct, 1)
+        "dif": fmt_price(dif.iloc[-1]), "dea": fmt_price(dea.iloc[-1]), "macd_h": fmt_price(macd_h.iloc[-1]),
+        "raw_macd_h": macd_h.iloc[-1],
+        "ma7": fmt_price(ma7), "ma25": fmt_price(ma25), "ma99": fmt_price(ma99),
+        "ema7": fmt_price(ema7), "ema25": fmt_price(ema25), "ema99": fmt_price(ema99),
+        "raw_ema7": ema7, "raw_ema25": ema25,
+        "boll_up": fmt_price(boll_up), "boll_mb": fmt_price(boll_mb), "boll_dn": fmt_price(boll_dn),
+        "st_val": fmt_price(st_val), "st_bull": st_bull, "sar_val": fmt_price(sar_val),
+        "delta_vol": round(delta_vol_pct, 1)
     }
 
+def generate_simple_analysis(i1h, i4h, rsi_1d):
+    """Genera un riassunto tecnico operativo chiaro."""
+    bullets = []
+    
+    # Confluenza Trend EMA
+    if i1h["raw_ema7"] > i1h["raw_ema25"] and i4h["raw_ema7"] > i4h["raw_ema25"]:
+        bullets.append("• **Trend**: Struttura fortemente rialzista su 1H e 4H (EMA7 > EMA25).")
+    elif i1h["raw_ema7"] < i1h["raw_ema25"] and i4h["raw_ema7"] < i4h["raw_ema25"]:
+        bullets.append("• **Trend**: Pressione ribassista su entrambi i timeframe.")
+    else:
+        bullets.append("• **Trend**: Fase laterale / di transizione (confluenza mista tra 1H e 4H).")
+
+    # Condizione RSI
+    if i1h["rsi6"] < 30 and i4h["rsi6"] < 40:
+        bullets.append("• **RSI**: Ipervenduto critico su 1H e 4H -> Possibile estensione di pulback o ingresso long a basso rischio.")
+    elif i1h["rsi6"] > 70 and i4h["rsi6"] > 60:
+        bullets.append("• **RSI**: Ipercomprato marcato -> Attenzione a prese di beneficio o possibili pattern Short/Take Profit.")
+    else:
+        bullets.append(f"• **RSI**: Valori di RSI neutri (1H: {i1h['rsi6']} | Daily: {rsi_1d}).")
+
+    # Volumi
+    if i1h["delta_vol"] > 20:
+        bullets.append(f"• **Volumi**: Spike volumetrico attivo in 1H (+{i1h['delta_vol']}% sopra la media a 5 periodi).")
+
+    return " <br> ".join(bullets)
+
 
 # ==============================================================================
-# 4. INTERFACCIA UTENTE & CONTROLLI (RIPRISTINATI)
+# 7. INTERFACCIA E DASHBOARD COMPLETA
 # ==============================================================================
-
-col_nav1, col_nav2, col_nav3 = st.columns(3)
-with col_nav1:
+col_n1, col_n2, col_n3 = st.columns(3)
+with col_n1:
     show_whales = st.checkbox("🐋 Whales Tape", value=False)
-with col_nav2:
-    show_risk = st.checkbox("🎯 Risk Calc", value=False)
-with col_nav3:
+with col_n2:
+    show_risk = st.checkbox("🎯 Calcolatore Rischio", value=False)
+with col_n3:
     show_matrix = st.checkbox("📊 Confluence Matrix", value=True)
 
 if show_whales:
-    st.markdown("### 🐋 Whales Tape (Live Stream)")
+    st.markdown("### 🐋 Whales Tape (Live Monitor)")
     st.dataframe(pd.DataFrame([
         {"Time": "LIVE", "Entity": "Binance Hot Wallet", "Asset": "BTC", "Amount": "1,250 BTC", "Type": "Internal Transfer"},
         {"Time": "LIVE", "Entity": "Coinbase Inst.", "Asset": "ETH", "Amount": "14,200 ETH", "Type": "Outflow"},
@@ -310,23 +361,23 @@ if show_risk:
     st.markdown("### 🎯 Risk & Position Size Calculator")
     c1, c2, c3 = st.columns(3)
     capital = c1.number_input("Capitale ($)", value=10000, step=500)
-    risk_pct = c2.slider("Rischio %", 0.5, 5.0, 1.0, 0.5)
+    risk_pct = c2.slider("Rischio % per Trade", 0.5, 5.0, 1.0, 0.5)
     sl_pct = c3.number_input("Stop Loss %", value=2.0, step=0.1)
     risk_usd = capital * (risk_pct / 100)
     pos_size = risk_usd / (sl_pct / 100) if sl_pct > 0 else 0
-    st.info(f"💡 Rischio Max: **${risk_usd:.2f}** | Size Posizione Suggerita: **${pos_size:.2f}**")
+    st.info(f"💡 Rischio Massimo: **${risk_usd:.2f}** | Size Posizione Consigliata: **${pos_size:.2f}**")
 
-with st.spinner("⚡ Connessione diretta alle API Binance per dati LIVE..."):
-    all_data = fetch_all_market_data(WATCHLIST)
+with st.spinner("⚡ Connessione streaming Binance Live..."):
+    all_data = fetch_all_coins_data(WATCHLIST)
 
 if not all_data:
-    st.error("⚠️ Nessun dato di mercato disponibile. Errore temporaneo di rete.")
+    st.error("⚠️ Nessun dato disponibile. Verifica che i simboli inseriti siano validi su Binance (es. BTCUSDT).")
     st.stop()
 
 if show_matrix:
-    st.markdown("### 📊 Confluence Matrix Overview (1H vs 4H)")
+    st.markdown("### 📊 Confluence Matrix (Panoramica Rapida)")
     matrix_rows = []
-    for sym in WATCHLIST[:6]:
+    for sym in WATCHLIST:
         if sym in all_data:
             d1 = all_data[sym]["df_1h"]
             d4 = all_data[sym]["df_4h"]
@@ -336,15 +387,15 @@ if show_matrix:
                 "Asset": sym.replace("USDT", "/USDT"),
                 "RSI(6) 1H": r1,
                 "RSI(6) 4H": r4,
-                "Confluenza": "🟢 DOUBLE BUY" if (r1 < 35 and r4 < 40) else ("🔴 DOUBLE SHORT" if (r1 > 65 and r4 > 60) else "🟡 MIXED / RANGE")
+                "Stato Confluenza": "🟢 DOUBLE BUY" if (r1 < 35 and r4 < 40) else ("🔴 DOUBLE SHORT" if (r1 > 65 and r4 > 60) else "🟡 NEUTRALE / RANGE")
             })
     if matrix_rows:
         st.table(pd.DataFrame(matrix_rows))
 
-st.markdown("<div class='filter-header'>Filtro Segnali Confluenza:</div>", unsafe_allow_html=True)
+st.markdown("<div class='filter-header'>Filtra per Tipologia di Segnale:</div>", unsafe_allow_html=True)
 filtro_segnale = st.radio(
     label="Filtro Segnali",
-    options=["🔴🔴 Tutti", "⚪🟢 Solo Buy", "⚪⚪ Alert TP/Short"],
+    options=["Tutte le Monete", "Solo Segnali Buy 🟢", "Solo Segnali Short 🔴"],
     index=0,
     horizontal=True,
     label_visibility="collapsed"
@@ -352,48 +403,39 @@ filtro_segnale = st.radio(
 
 
 # ==============================================================================
-# 5. CARDS CRYPTO LIVE (RIPRISTINATE CON SOTTO-BADGE E DETTAGLI)
+# 8. SCHEDE MONETE & ANALISI
 # ==============================================================================
-
 for symbol in WATCHLIST:
     if symbol not in all_data:
         continue
     
     pack = all_data[symbol]
-    df_1h = pack["df_1h"]
-    df_4h = pack["df_4h"]
-    df_1d = pack["df_1d"]
-    ticker = pack["ticker"]
+    df_1h, df_4h, df_1d, ticker = pack["df_1h"], pack["df_4h"], pack["df_1d"], pack["ticker"]
 
-    i1h = compute_binance_indicators(df_1h)
-    i4h = compute_binance_indicators(df_4h)
+    i1h = compute_indicators(df_1h)
+    i4h = compute_indicators(df_4h)
     rsi_1d = round(calc_rsi(df_1d["close"], 14).iloc[-1], 1) if not df_1d.empty else 50.0
 
     price_val = float(ticker.get("lastPrice", 0))
     change_val = float(ticker.get("priceChangePercent", 0))
-    price_str = f"${price_val:,.2f}" if price_val >= 1 else f"${price_val:.4f}"
+    price_str = fmt_price(price_val)
     change_str = f"({change_val:+.2f}%)"
     change_class = "price-change-up" if change_val >= 0 else "price-change-down"
 
     if i1h["rsi6"] > 70 and i4h["rsi6"] > 60:
-        signal_type = "Short"
-        badge_status = "🔴 HIGH CONFLUENCE SHORT (1H + 4H)"
-        badge_class = "badge-short"
+        signal_type, badge_status, badge_class = "Short", "🔴 HIGH CONFLUENCE SHORT (1H + 4H)", "badge-short"
     elif i1h["rsi6"] < 30 and i4h["rsi6"] < 40:
-        signal_type = "Buy"
-        badge_status = "🟢 HIGH CONFLUENCE BUY (1H + 4H)"
-        badge_class = "badge-buy"
+        signal_type, badge_status, badge_class = "Buy", "🟢 HIGH CONFLUENCE BUY (1H + 4H)", "badge-buy"
     else:
-        signal_type = "Neutral"
-        badge_status = "🟡 NEUTRALE / MIXED RANGE"
-        badge_class = "badge-range"
+        signal_type, badge_status, badge_class = "Neutral", "🟡 NEUTRALE / MIXED RANGE", "badge-range"
 
-    if filtro_segnale == "⚪🟢 Solo Buy" and signal_type != "Buy":
+    if filtro_segnale == "Solo Segnali Buy 🟢" and signal_type != "Buy":
         continue
-    if filtro_segnale == "⚪⚪ Alert TP/Short" and signal_type != "Short":
+    if filtro_segnale == "Solo Segnali Short 🔴" and signal_type != "Short":
         continue
 
     coin_name = symbol.replace("USDT", "")
+    analysis_text = generate_simple_analysis(i1h, i4h, rsi_1d)
 
     raw_html = f"""
 <div class="crypto-card">
@@ -403,9 +445,9 @@ for symbol in WATCHLIST:
 <span class="{badge_class}">{badge_status}</span>
 </div>
 <div class="price-box">
-<div class="price-val">{price_str}</div>
+<div class="price-val">${price_str}</div>
 <div class="{change_class}">{change_str}</div>
-<div style="font-size:11px; color:#8b949e; margin-top:2px;">RSI 1D (Daily Trend): <strong style="color:#ffffff;">{rsi_1d}</strong></div>
+<div style="font-size:11px; color:#8b949e; margin-top:2px;">RSI 1D (Daily): <strong style="color:#ffffff;">{rsi_1d}</strong></div>
 </div>
 </div>
 
@@ -422,7 +464,7 @@ for symbol in WATCHLIST:
 <div class="ind-label">STOCHRSI 1H</div>
 <div class="ind-val">K:{i1h['stoch_k']} | D:{i1h['stoch_d']}</div>
 <div class="ind-sub-{'red' if i1h['stoch_k'] > 80 else ('green' if i1h['stoch_k'] < 20 else 'yellow')}">
-{'🎯 Short' if i1h['stoch_k'] > 80 else ('🟢 Buy' if i1h['stoch_k'] < 20 else '🟡 Neutral')}
+{'🎯 Overbought' if i1h['stoch_k'] > 80 else ('🟢 Oversold' if i1h['stoch_k'] < 20 else '🟡 Neutral')}
 </div>
 </div>
 <div class="ind-item">
@@ -438,18 +480,18 @@ for symbol in WATCHLIST:
 <div class="ind-item">
 <div class="ind-label">MACD 1H</div>
 <div class="ind-val">DIF:{i1h['dif']} | DEA:{i1h['dea']}</div>
-<div class="ind-sub-{'green' if i1h['macd_h'] >= 0 else 'red'}">Hist: {i1h['macd_h']}</div>
+<div class="ind-sub-{'green' if i1h['raw_macd_h'] >= 0 else 'red'}">Hist: {i1h['macd_h']}</div>
 </div>
 <div class="ind-item">
 <div class="ind-label">EMA (7/25/99) 1H</div>
 <div class="ind-val" style="font-size: 11px;">
-{i1h['ema7']:,.1f} / {i1h['ema25']:,.1f} / {i1h['ema99']:,.1f}
+{i1h['ema7']} / {i1h['ema25']} / {i1h['ema99']}
 </div>
 </div>
 <div class="ind-item">
 <div class="ind-label">MA (7/25/99) 1H</div>
 <div class="ind-val" style="font-size: 11px;">
-{i1h['ma7']:,.1f} / {i1h['ma25']:,.1f} / {i1h['ma99']:,.1f}
+{i1h['ma7']} / {i1h['ma25']} / {i1h['ma99']}
 </div>
 </div>
 </div>
@@ -458,7 +500,7 @@ for symbol in WATCHLIST:
 <div class="ind-item">
 <div class="ind-label">BOLLINGER (20,2) 1H</div>
 <div class="ind-val" style="font-size: 11px;">
-UP: {i1h['boll_up']:,.2f} | MB: {i1h['boll_mb']:,.2f} | DN: {i1h['boll_dn']:,.2f}
+UP: {i1h['boll_up']} | MB: {i1h['boll_mb']} | DN: {i1h['boll_dn']}
 </div>
 </div>
 <div class="ind-item">
@@ -482,7 +524,7 @@ ST: {i1h['st_val']} ({'🟢' if i1h['st_bull'] else '🔴'}) | SAR: {i1h['sar_va
 <div class="ind-label">STOCHRSI 4H</div>
 <div class="ind-val">K:{i4h['stoch_k']} | D:{i4h['stoch_d']}</div>
 <div class="ind-sub-{'red' if i4h['stoch_k'] > 80 else ('green' if i4h['stoch_k'] < 20 else 'yellow')}">
-{'🎯 Short' if i4h['stoch_k'] > 80 else ('🟢 Buy' if i4h['stoch_k'] < 20 else '🟡 Neutral')}
+{'🎯 Overbought' if i4h['stoch_k'] > 80 else ('🟢 Oversold' if i4h['stoch_k'] < 20 else '🟡 Neutral')}
 </div>
 </div>
 <div class="ind-item">
@@ -498,18 +540,18 @@ ST: {i1h['st_val']} ({'🟢' if i1h['st_bull'] else '🔴'}) | SAR: {i1h['sar_va
 <div class="ind-item">
 <div class="ind-label">MACD 4H</div>
 <div class="ind-val">DIF:{i4h['dif']} | DEA:{i4h['dea']}</div>
-<div class="ind-sub-{'green' if i4h['macd_h'] >= 0 else 'red'}">Hist: {i4h['macd_h']}</div>
+<div class="ind-sub-{'green' if i4h['raw_macd_h'] >= 0 else 'red'}">Hist: {i4h['macd_h']}</div>
 </div>
 <div class="ind-item">
 <div class="ind-label">EMA (7/25/99) 4H</div>
 <div class="ind-val" style="font-size: 11px;">
-{i4h['ema7']:,.1f} / {i4h['ema25']:,.1f} / {i4h['ema99']:,.1f}
+{i4h['ema7']} / {i4h['ema25']} / {i4h['ema99']}
 </div>
 </div>
 <div class="ind-item">
 <div class="ind-label">MA (7/25/99) 4H</div>
 <div class="ind-val" style="font-size: 11px;">
-{i4h['ma7']:,.1f} / {i4h['ma25']:,.1f} / {i4h['ma99']:,.1f}
+{i4h['ma7']} / {i4h['ma25']} / {i4h['ma99']}
 </div>
 </div>
 </div>
@@ -518,7 +560,7 @@ ST: {i1h['st_val']} ({'🟢' if i1h['st_bull'] else '🔴'}) | SAR: {i1h['sar_va
 <div class="ind-item">
 <div class="ind-label">BOLLINGER (20,2) 4H</div>
 <div class="ind-val" style="font-size: 11px;">
-UP: {i4h['boll_up']:,.2f} | MB: {i4h['boll_mb']:,.2f} | DN: {i4h['boll_dn']:,.2f}
+UP: {i4h['boll_up']} | MB: {i4h['boll_mb']} | DN: {i4h['boll_dn']}
 </div>
 </div>
 <div class="ind-item">
@@ -528,6 +570,12 @@ ST: {i4h['st_val']} ({'🟢' if i4h['st_bull'] else '🔴'}) | SAR: {i4h['sar_va
 </div>
 </div>
 </div>
+
+<div class="analysis-box">
+<div class="analysis-title">📌 Analisi Sintetica Trader</div>
+{analysis_text}
+</div>
+
 </div>
 """
     clean_html = "\n".join(line.strip() for line in raw_html.splitlines())
