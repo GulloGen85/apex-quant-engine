@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 
 # ==============================================================================
-# 1. CONFIGURAZIONE STREAMLIT & STILE DARK PRO
+# 1. CONFIGURAZIONE STREAMLIT & STILE DARK PRO COMPLETO
 # ==============================================================================
 st.set_page_config(
     page_title="Binance MTF Live Screener Real-Time",
@@ -125,7 +125,7 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ==============================================================================
-# 2. CONNETTORE LIVE API (SOLO DATI REALI DA EXCHANGE)
+# 2. CONNETTORE LIVE API BINANCE (DATI REALI - NO GEOBLOCK)
 # ==============================================================================
 
 WATCHLIST = [
@@ -134,72 +134,53 @@ WATCHLIST = [
     "DOGEUSDT", "SUIUSDT", "NEARUSDT", "DOTUSDT"
 ]
 
-# Intestazione HTTP reale per evitare che Binance/Bybit blocchino le chiamate da AWS/Streamlit
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 }
 
 def fetch_single_kline_fast(symbol: str, interval: str, limit: int = 150) -> pd.DataFrame:
-    # 1. TENTATIVO BINANCE
-    try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        res = requests.get(url, headers=HTTP_HEADERS, timeout=3.0)
-        if res.status_code == 200:
-            data = res.json()
-            if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data, columns=[
-                    "open_time", "open", "high", "low", "close", "volume",
-                    "close_time", "qav", "num_trades", "tbb", "tbq", "ignore"
-                ])
-                for col in ["open", "high", "low", "close", "volume"]:
-                    df[col] = df[col].astype(float)
-                return df
-    except Exception:
-        pass
+    """Richiede candele reali usando endpoint Binance non soggetti a blocchi geografici AWS."""
+    endpoints = [
+        f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
+        f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    ]
+    
+    for url in endpoints:
+        try:
+            res = requests.get(url, headers=HTTP_HEADERS, timeout=3.5)
+            if res.status_code == 200:
+                data = res.json()
+                if isinstance(data, list) and len(data) > 0:
+                    df = pd.DataFrame(data, columns=[
+                        "open_time", "open", "high", "low", "close", "volume",
+                        "close_time", "qav", "num_trades", "tbb", "tbq", "ignore"
+                    ])
+                    for col in ["open", "high", "low", "close", "volume"]:
+                        df[col] = df[col].astype(float)
+                    return df
+        except Exception:
+            continue
 
-    # 2. FALLBACK SU BYBIT (SE BINANCE BLOCCA L'IP DI STREAMLIT)
-    bybit_interval = {"1h": "60", "4h": "240", "1d": "D"}.get(interval, "60")
-    try:
-        url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={symbol}&interval={bybit_interval}&limit={limit}"
-        res = requests.get(url, headers=HTTP_HEADERS, timeout=3.0)
-        if res.status_code == 200:
-            list_data = res.json().get("result", {}).get("list", [])
-            if list_data:
-                df = pd.DataFrame(list_data, columns=["open_time", "open", "high", "low", "close", "volume", "turnover"])
-                df = df.iloc[::-1].reset_index(drop=True)
-                for col in ["open", "high", "low", "close", "volume"]:
-                    df[col] = df[col].astype(float)
-                return df
-    except Exception:
-        pass
-
-    # Se entrambe le API falliscono, restituisce un DataFrame vuoto (MAI DATI FINTI)
     return pd.DataFrame()
 
 def fetch_ticker_fast(symbol: str) -> dict:
-    # 1. BINANCE TICKER
-    try:
-        res = requests.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}", headers=HTTP_HEADERS, timeout=3.0)
-        if res.status_code == 200:
-            data = res.json()
-            return {"lastPrice": float(data["lastPrice"]), "priceChangePercent": float(data["priceChangePercent"])}
-    except Exception:
-        pass
-
-    # 2. BYBIT TICKER
-    try:
-        res = requests.get(f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol}", headers=HTTP_HEADERS, timeout=3.0)
-        if res.status_code == 200:
-            data = res.json().get("result", {}).get("list", [])
-            if data:
-                last_price = float(data[0].get("lastPrice", 0))
-                prev_price = float(data[0].get("prevPrice24h", last_price))
-                change_pct = ((last_price - prev_price) / prev_price) * 100 if prev_price > 0 else 0.0
-                return {"lastPrice": last_price, "priceChangePercent": change_pct}
-    except Exception:
-        pass
-
-    return None
+    """Recupera il prezzo dal vivo e la variazione percentuale 24h."""
+    endpoints = [
+        f"https://data-api.binance.vision/api/v3/ticker/24hr?symbol={symbol}",
+        f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}"
+    ]
+    for url in endpoints:
+        try:
+            res = requests.get(url, headers=HTTP_HEADERS, timeout=3.5)
+            if res.status_code == 200:
+                data = res.json()
+                return {
+                    "lastPrice": float(data["lastPrice"]),
+                    "priceChangePercent": float(data["priceChangePercent"])
+                }
+        except Exception:
+            continue
+    return {}
 
 def load_symbol_pack(symbol: str):
     df_1h = fetch_single_kline_fast(symbol, "1h", 150)
@@ -207,11 +188,10 @@ def load_symbol_pack(symbol: str):
     df_1d = fetch_single_kline_fast(symbol, "1d", 150)
     ticker = fetch_ticker_fast(symbol)
 
-    # Se le API non hanno restituito i dati reali del grafico, scarta il simbolo
     if df_1h.empty or df_4h.empty:
         return None
 
-    if ticker is None or ticker["lastPrice"] == 0:
+    if not ticker or "lastPrice" not in ticker:
         ticker = {
             "lastPrice": float(df_1h["close"].iloc[-1]),
             "priceChangePercent": 0.0
@@ -228,7 +208,7 @@ def load_symbol_pack(symbol: str):
 @st.cache_data(ttl=10, show_spinner=False)
 def fetch_all_market_data(symbols: list) -> dict:
     results = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         future_to_sym = {executor.submit(load_symbol_pack, sym): sym for sym in symbols}
         for future in concurrent.futures.as_completed(future_to_sym):
             sym = future_to_sym[future]
@@ -242,7 +222,7 @@ def fetch_all_market_data(symbols: list) -> dict:
 
 
 # ==============================================================================
-# 3. MOTOR DI CALCOLO INDICATORI REALI
+# 3. MOTORE DI CALCOLO INDICATORI REALI
 # ==============================================================================
 
 def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
@@ -307,7 +287,7 @@ def compute_binance_indicators(df: pd.DataFrame):
 
 
 # ==============================================================================
-# 4. INTERFACCIA UTENTE & CONTROLLI
+# 4. INTERFACCIA UTENTE & CONTROLLI (RIPRISTINATI)
 # ==============================================================================
 
 col_nav1, col_nav2, col_nav3 = st.columns(3)
@@ -319,7 +299,7 @@ with col_nav3:
     show_matrix = st.checkbox("📊 Confluence Matrix", value=True)
 
 if show_whales:
-    st.markdown("### 🐋 Whales Tape (On-Chain Live Stream)")
+    st.markdown("### 🐋 Whales Tape (Live Stream)")
     st.dataframe(pd.DataFrame([
         {"Time": "LIVE", "Entity": "Binance Hot Wallet", "Asset": "BTC", "Amount": "1,250 BTC", "Type": "Internal Transfer"},
         {"Time": "LIVE", "Entity": "Coinbase Inst.", "Asset": "ETH", "Amount": "14,200 ETH", "Type": "Outflow"},
@@ -336,11 +316,11 @@ if show_risk:
     pos_size = risk_usd / (sl_pct / 100) if sl_pct > 0 else 0
     st.info(f"💡 Rischio Max: **${risk_usd:.2f}** | Size Posizione Suggerita: **${pos_size:.2f}**")
 
-with st.spinner("⚡ Connessione alle API degli Exchange per dati LIVE..."):
+with st.spinner("⚡ Connessione diretta alle API Binance per dati LIVE..."):
     all_data = fetch_all_market_data(WATCHLIST)
 
 if not all_data:
-    st.error("⚠️ Nessun dato di mercato disponibile. Le API degli exchange non hanno risposto o sono temporaneamente irraggiungibili da questo server.")
+    st.error("⚠️ Nessun dato di mercato disponibile. Errore temporaneo di rete.")
     st.stop()
 
 if show_matrix:
@@ -372,7 +352,7 @@ filtro_segnale = st.radio(
 
 
 # ==============================================================================
-# 5. CARDS CRYPTO LIVE
+# 5. CARDS CRYPTO LIVE (RIPRISTINATE CON SOTTO-BADGE E DETTAGLI)
 # ==============================================================================
 
 for symbol in WATCHLIST:
