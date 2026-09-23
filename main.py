@@ -1,5 +1,3 @@
-"""Screener Binance spot/perpetual su più timeframe."""
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import math
@@ -37,13 +35,13 @@ def get(market, route, **params):
         BASE[market] + route,
         params=params,
         headers={"User-Agent": "CryptoScreenerV2/1.0"},
-        timeout=8,
+        timeout=3.5,
     )
     response.raise_for_status()
     return response.json()
 
 
-@st.cache_data(ttl=20, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def fetch(symbol, market):
     rows = {}
 
@@ -99,7 +97,9 @@ def fetch(symbol, market):
         rows,
         {
             "price": float(ticker["lastPrice"]),
-            "change": float(ticker["priceChangePercent"]),
+            "change": float(
+                ticker["priceChangePercent"]
+            ),
         },
         datetime.now(timezone.utc),
     )
@@ -138,24 +138,22 @@ def supertrend(high, low, close, period=10, factor=3):
         previous = i - 1
 
         if i > period:
-            keep_new_upper = (
-                upper.iloc[i] < final_upper.iloc[previous]
+            if not (
+                upper.iloc[i]
+                < final_upper.iloc[previous]
                 or close.iloc[previous]
                 > final_upper.iloc[previous]
-            )
-
-            if not keep_new_upper:
+            ):
                 final_upper.iloc[i] = (
                     final_upper.iloc[previous]
                 )
 
-            keep_new_lower = (
-                lower.iloc[i] > final_lower.iloc[previous]
+            if not (
+                lower.iloc[i]
+                > final_lower.iloc[previous]
                 or close.iloc[previous]
                 < final_lower.iloc[previous]
-            )
-
-            if not keep_new_lower:
+            ):
                 final_lower.iloc[i] = (
                     final_lower.iloc[previous]
                 )
@@ -173,7 +171,10 @@ def supertrend(high, low, close, period=10, factor=3):
         else:
             bullish.iloc[i] = (
                 close.iloc[i]
-                >= (high.iloc[i] + low.iloc[i]) / 2
+                >= (
+                    high.iloc[i]
+                    + low.iloc[i]
+                ) / 2
             )
 
         line.iloc[i] = (
@@ -192,17 +193,34 @@ def indicators(frame):
     volume = frame["volume"].astype(float)
 
     change = close.diff()
-    gain = rma(change.clip(lower=0), 14)
-    loss = rma((-change).clip(lower=0), 14)
+    gain = rma(
+        change.clip(lower=0), 14
+    )
+    loss = rma(
+        (-change).clip(lower=0), 14
+    )
 
     denominator = gain + loss
+
     rsi = (
         100 * gain
-        / denominator.replace(0, float("nan"))
+        / denominator.replace(
+            0, float("nan")
+        )
     )
-    rsi = rsi.mask((gain == 0) & (loss == 0), 50)
-    rsi = rsi.mask((loss == 0) & (gain > 0), 100)
-    rsi = rsi.mask((gain == 0) & (loss > 0), 0)
+
+    rsi = rsi.mask(
+        (gain == 0) & (loss == 0),
+        50,
+    )
+    rsi = rsi.mask(
+        (loss == 0) & (gain > 0),
+        100,
+    )
+    rsi = rsi.mask(
+        (gain == 0) & (loss > 0),
+        0,
+    )
 
     rsi_low = rsi.rolling(14).min()
     rsi_high = rsi.rolling(14).max()
@@ -238,14 +256,19 @@ def indicators(frame):
     ).mean()
 
     macd = ema12 - ema26
+
     macd_signal = macd.ewm(
         span=9, adjust=False
     ).mean()
 
-    macd_histogram = macd - macd_signal
+    macd_histogram = (
+        macd - macd_signal
+    )
 
     bb_middle = close.rolling(20).mean()
-    bb_std = close.rolling(20).std(ddof=0)
+    bb_std = (
+        close.rolling(20).std(ddof=0)
+    )
 
     trend, bullish, atr = supertrend(
         high, low, close
@@ -289,13 +312,15 @@ def indicators(frame):
 
     adx = rma(dx, 14)
 
-    previous_volume_average = (
+    volume_average = (
         volume.shift(1)
         .rolling(20)
         .mean()
     )
 
-    taker_buy = frame["taker_buy"].astype(float)
+    taker_buy = frame[
+        "taker_buy"
+    ].astype(float)
 
     return {
         "close": close,
@@ -306,23 +331,34 @@ def indicators(frame):
         "ema7": ema7,
         "ema25": ema25,
         "ema99": ema99,
-        "bb_upper": bb_middle + 2 * bb_std,
-        "bb_lower": bb_middle - 2 * bb_std,
+        "bb_upper": (
+            bb_middle + 2 * bb_std
+        ),
+        "bb_lower": (
+            bb_middle - 2 * bb_std
+        ),
         "supertrend": trend,
         "bull": bullish,
         "atr": atr,
         "adx": adx,
-        "recent_low": low.rolling(8).min(),
-        "recent_high": high.rolling(8).max(),
+        "recent_low": (
+            low.rolling(8).min()
+        ),
+        "recent_high": (
+            high.rolling(8).max()
+        ),
         "rvol": (
             volume
-            / previous_volume_average.replace(
+            / volume_average.replace(
                 0, float("nan")
             )
         ),
         "taker_delta": (
-            100 * (2 * taker_buy - volume)
-            / volume.replace(0, float("nan"))
+            100
+            * (2 * taker_buy - volume)
+            / volume.replace(
+                0, float("nan")
+            )
         ),
     }
 
@@ -330,15 +366,22 @@ def indicators(frame):
 def safe(value):
     try:
         value = float(value)
-        return value if math.isfinite(value) else None
+        return (
+            value
+            if math.isfinite(value)
+            else None
+        )
     except (ValueError, TypeError):
         return None
 
 
 def snapshot(calculated, position):
     return {
-        key: safe(series.iloc[position])
-        for key, series in calculated.items()
+        key: safe(
+            series.iloc[position]
+        )
+        for key, series
+        in calculated.items()
     }
 
 
@@ -360,29 +403,45 @@ def classify(data, btc_bullish):
         )
 
     conditions = [
-        daily["close"] > daily["ema25"],
-        four_hour["close"] > four_hour["ema25"],
+        daily["close"]
+        > daily["ema25"],
+
+        four_hour["close"]
+        > four_hour["ema25"],
+
         four_hour["bull"] == 1,
-        one_hour["ema7"] > one_hour["ema25"],
+
+        one_hour["ema7"]
+        > one_hour["ema25"],
+
         one_hour["hist"] is not None
         and one_hour["hist"] > 0,
+
         entry["k"] is not None
         and entry["d"] is not None
         and entry["k"] > entry["d"],
-        entry["close"] > entry["ema7"],
+
+        entry["close"]
+        > entry["ema7"],
+
         entry["taker_delta"] is not None
         and entry["taker_delta"] > 0,
+
         entry["rvol"] is not None
         and entry["rvol"] >= 1.2,
+
         btc_bullish,
     ]
 
     score = sum(conditions)
 
     if (
-        four_hour["close"] < four_hour["ema25"]
-        and one_hour["close"] < one_hour["ema25"]
-        and entry["close"] < entry["ema7"]
+        four_hour["close"]
+        < four_hour["ema25"]
+        and one_hour["close"]
+        < one_hour["ema25"]
+        and entry["close"]
+        < entry["ema7"]
     ):
         return (
             "PRESSIONE RIBASSISTA",
@@ -398,12 +457,14 @@ def classify(data, btc_bullish):
         return (
             "IPERVENDUTO · ATTENDI",
             score,
-            "RSI basso da solo non conferma un rimbalzo",
+            "RSI basso da solo "
+            "non conferma un rimbalzo",
         )
 
     trigger = (
         score >= 7
-        and entry["close"] > entry["ema7"]
+        and entry["close"]
+        > entry["ema7"]
         and entry["k"] is not None
         and entry["d"] is not None
         and entry["k"] > entry["d"]
@@ -422,7 +483,8 @@ def classify(data, btc_bullish):
         return (
             "SETUP LONG · ATTENDI",
             score,
-            "Confluenza parziale: attendi conferma",
+            "Confluenza parziale: "
+            "attendi conferma",
         )
 
     return (
@@ -434,13 +496,13 @@ def classify(data, btc_bullish):
 
 def trade_plan(
     frame,
-    indicators_15m,
+    calculated_15m,
     position,
     ticker_price,
     fee_percent,
 ):
     point = snapshot(
-        indicators_15m,
+        calculated_15m,
         position,
     )
 
@@ -457,20 +519,19 @@ def trade_plan(
     ):
         return None
 
-    if point["atr"] <= 0 or ticker_price <= 0:
+    if (
+        point["atr"] <= 0
+        or ticker_price <= 0
+    ):
         return None
 
-    last_candle = frame.iloc[position]
+    candle = frame.iloc[position]
 
-    # Prezzo di attivazione sopra il massimo
-    # della candela 15m presa in esame.
     entry = max(
-        float(last_candle["high"]),
+        float(candle["high"]),
         point["ema7"],
     ) + 0.05 * point["atr"]
 
-    # Stop sotto il minimo recente oppure
-    # ad almeno 1,5 ATR dall'ingresso.
     stop = min(
         point["recent_low"],
         entry - 1.5 * point["atr"],
@@ -478,19 +539,17 @@ def trade_plan(
 
     risk = entry - stop
 
-    if risk <= 0:
-        return None
-
-    if risk / entry > 0.10:
+    if (
+        risk <= 0
+        or risk / entry > 0.10
+    ):
         return None
 
     targets = [
-        entry + risk * multiplier
-        for multiplier in (1, 2, 3)
+        entry + risk * multiple
+        for multiple in (1, 2, 3)
     ]
 
-    # Stima rendimento dopo commissione
-    # all'ingresso e all'uscita.
     net_returns = [
         100 * (
             (
@@ -509,11 +568,15 @@ def trade_plan(
     return {
         "entry": entry,
         "stop": stop,
-        "risk_pct": risk / entry * 100,
+        "risk_pct": (
+            risk / entry * 100
+        ),
         "targets": targets,
         "net": net_returns,
         "distance_pct": (
-            100 * (entry / ticker_price - 1)
+            100 * (
+                entry / ticker_price - 1
+            )
         ),
     }
 
@@ -534,14 +597,16 @@ def fmt(value):
 st.title("⚡ Crypto Screener V2")
 
 st.caption(
-    "Dati pubblici Binance · segnali descrittivi, non ordini"
+    "Dati pubblici Binance · "
+    "segnali descrittivi, non ordini"
 )
 
 with st.sidebar:
     st.header("Impostazioni")
 
     raw = st.text_area(
-        "Watchlist: simboli separati da virgole",
+        "Watchlist: simboli separati "
+        "da virgole",
         ", ".join(PAIRS),
         height=160,
     )
@@ -584,47 +649,107 @@ with st.sidebar:
     )
 
     fee_percent = st.number_input(
-        "Commissione stimata per lato (%)",
+        "Commissione stimata "
+        "per lato (%)",
         min_value=0.0,
         max_value=2.0,
         value=0.1,
         step=0.01,
     )
 
-    st.caption(
-        "Per ogni coppia, ticker e candele "
-        "provengono dallo stesso mercato."
-    )
-
 
 @st.fragment(run_every=f"{refresh}s")
 def dashboard():
-    if not watch:
+    selected = [
+        (
+            symbol,
+            markets_for_pair[symbol],
+        )
+        for symbol in watch
+    ]
+
+    if not selected:
         st.info(
-            "Inserisci almeno una coppia nella watchlist."
+            "Inserisci almeno una coppia."
         )
         return
 
-    # Richiesta diretta delle coppie: un errore
-    # su exchangeInfo non blocca la dashboard.
-    selected = [
-        (symbol, markets_for_pair[symbol])
-        for symbol in watch
-    ]
+    # Test rapido: se la prima richiesta fallisce,
+    # evita oltre 100 richieste destinate a fallire.
+    try:
+        probe_symbol, probe_market = (
+            selected[0]
+        )
+
+        get(
+            probe_market,
+            "/klines",
+            symbol=probe_symbol,
+            interval="15m",
+            limit=2,
+        )
+
+    except requests.HTTPError as error:
+        code = (
+            error.response.status_code
+            if error.response is not None
+            else "?"
+        )
+
+        st.error(
+            "Binance non risponde "
+            "dal server dell'app: "
+            f"HTTP {code} "
+            f"({probe_market}, "
+            f"{probe_symbol})."
+        )
+        return
+
+    except requests.RequestException as error:
+        st.error(
+            "Connessione API non riuscita: "
+            f"{type(error).__name__}. "
+            "La scansione è stata fermata."
+        )
+        return
 
     packs = {}
     errors = {}
 
-    with ThreadPoolExecutor(max_workers=7) as executor:
+    progress = st.progress(
+        0,
+        text="Caricamento coppie...",
+    )
+
+    with ThreadPoolExecutor(
+        max_workers=12
+    ) as executor:
         futures = {
             executor.submit(
-                fetch, symbol, market
+                fetch,
+                symbol,
+                market,
             ): (symbol, market)
-            for symbol, market in selected
+            for symbol, market
+            in selected
         }
 
-        for future in as_completed(futures):
-            symbol, market = futures[future]
+        for count, future in enumerate(
+            as_completed(futures),
+            1,
+        ):
+            progress.progress(
+                count / len(futures),
+                text=(
+                    f"Caricate "
+                    f"{count}/{len(futures)} "
+                    "coppie"
+                ),
+            )
+
+            symbol, market = (
+                futures[future]
+            )
 
             try:
                 packs[symbol] = (
@@ -633,14 +758,15 @@ def dashboard():
                 )
 
             except requests.HTTPError as error:
-                status = (
+                code = (
                     error.response.status_code
                     if error.response is not None
                     else "?"
                 )
 
                 errors[symbol] = (
-                    f"HTTP {status} ({market})"
+                    f"HTTP {code} "
+                    f"({market})"
                 )
 
             except (
@@ -654,41 +780,57 @@ def dashboard():
                     f"{str(error)[:80]}"
                 )
 
+    progress.empty()
+
     if errors:
         with st.expander(
-            f"⚠️ Dati non disponibili: "
+            "⚠️ Dati non disponibili: "
             f"{len(errors)} coppie",
             expanded=not packs,
         ):
-            for symbol, error in errors.items():
+            for symbol, error in (
+                errors.items()
+            ):
                 st.write(
-                    f"**{symbol}:** {error}"
+                    f"**{symbol}:** "
+                    f"{error}"
                 )
 
     if not packs:
         st.error(
             "Nessuna coppia caricata. "
-            "Leggi i codici di errore sopra. "
-            "HTTP 403/451 può indicare che il server "
-            "non riesce ad accedere alle API Binance."
+            "Leggi gli errori mostrati "
+            "qui sopra."
         )
         return
 
-    position = -2 if confirmed else -1
+    position = (
+        -2 if confirmed
+        else -1
+    )
 
     btc_bullish = False
 
     if "BTCUSDC" in packs:
-        _, btc_frames, _, _ = packs["BTCUSDC"]
+        (
+            _,
+            btc_frames,
+            _,
+            _,
+        ) = packs["BTCUSDC"]
 
         btc_values = snapshot(
-            indicators(btc_frames["4h"]),
+            indicators(
+                btc_frames["4h"]
+            ),
             position,
         )
 
         btc_bullish = bool(
-            btc_values["close"] is not None
-            and btc_values["ema25"] is not None
+            btc_values["close"]
+            is not None
+            and btc_values["ema25"]
+            is not None
             and btc_values["close"]
             > btc_values["ema25"]
         )
@@ -700,12 +842,20 @@ def dashboard():
         if symbol not in packs:
             continue
 
-        market, frames, ticker, updated = packs[symbol]
+        (
+            market,
+            frames,
+            ticker,
+            updated,
+        ) = packs[symbol]
 
         try:
             calculated = {
-                timeframe: indicators(frame)
-                for timeframe, frame in frames.items()
+                timeframe: indicators(
+                    frame
+                )
+                for timeframe, frame
+                in frames.items()
             }
 
             values = {
@@ -713,10 +863,15 @@ def dashboard():
                     calculated[timeframe],
                     position,
                 )
-                for timeframe in INTERVALS
+                for timeframe
+                in INTERVALS
             }
 
-            state, score, explanation = classify(
+            (
+                state,
+                score,
+                explanation,
+            ) = classify(
                 values,
                 btc_bullish,
             )
@@ -729,26 +884,34 @@ def dashboard():
                 fee_percent,
             )
 
-            candle_time = pd.to_datetime(
-                frames["15m"]["close_time"].iloc[
-                    position
-                ],
-                unit="ms",
-                utc=True,
+            candle_time = (
+                pd.to_datetime(
+                    frames["15m"][
+                        "close_time"
+                    ].iloc[position],
+                    unit="ms",
+                    utc=True,
+                )
             )
 
             rows.append(
                 {
                     "Coppia": symbol,
                     "Mercato": market,
-                    "Prezzo ticker": ticker["price"],
-                    "24h %": ticker["change"],
+                    "Prezzo ticker":
+                        ticker["price"],
+                    "24h %":
+                        ticker["change"],
                     "Stato": state,
                     "Score /10": score,
-                    "RSI 1H": values["1h"]["rsi"],
-                    "ADX 4H": values["4h"]["adx"],
+                    "RSI 1H":
+                        values["1h"]["rsi"],
+                    "ADX 4H":
+                        values["4h"]["adx"],
                     "Delta taker 1H %":
-                        values["1h"]["taker_delta"],
+                        values["1h"][
+                            "taker_delta"
+                        ],
                     "RVOL 1H":
                         values["1h"]["rvol"],
                     "Entry":
@@ -801,24 +964,33 @@ def dashboard():
 
     st.caption(
         "Ultima lettura: "
-        + datetime.now(timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S UTC"
+        + datetime.now(
+            timezone.utc
+        ).strftime(
+            "%Y-%m-%d "
+            "%H:%M:%S UTC"
         )
         + (
             " · candele chiuse"
             if confirmed
-            else " · candele aperte: segnali provvisori"
+            else (
+                " · candele aperte: "
+                "segnali provvisori"
+            )
         )
     )
 
     if not rows:
         st.error(
-            "Dati ricevuti, ma indicatori "
+            "Dati ricevuti, "
+            "ma indicatori "
             "non calcolabili."
         )
         return
 
-    ranking = pd.DataFrame(rows)
+    ranking = pd.DataFrame(
+        rows
+    )
 
     priority = {
         "TRIGGER LONG": 3,
@@ -835,13 +1007,21 @@ def dashboard():
     ranking = (
         ranking
         .sort_values(
-            ["Priorità", "Score /10", "24h %"],
+            [
+                "Priorità",
+                "Score /10",
+                "24h %",
+            ],
             ascending=False,
         )
-        .drop(columns="Priorità")
+        .drop(
+            columns="Priorità"
+        )
     )
 
-    st.subheader("📊 Classifica")
+    st.subheader(
+        "📊 Classifica"
+    )
 
     st.dataframe(
         ranking,
@@ -850,15 +1030,20 @@ def dashboard():
     )
 
     st.caption(
-        "La classifica dà precedenza ai trigger, "
-        "poi allo score. I livelli sono scenari long "
-        "calcolati da candele 15m e ATR. "
-        "Lo score non è una probabilità di profitto."
+        "La classifica dà "
+        "precedenza ai trigger, "
+        "poi allo score. Entry, "
+        "stop e target sono "
+        "scenari calcolati: "
+        "lo score non è una "
+        "probabilità di profitto."
     )
 
     chosen = st.selectbox(
         "Analisi coppia",
-        ranking["Coppia"].tolist(),
+        ranking[
+            "Coppia"
+        ].tolist(),
     )
 
     (
@@ -870,150 +1055,209 @@ def dashboard():
         plan,
     ) = details[chosen]
 
-    current_state = ranking.loc[
-        ranking["Coppia"] == chosen,
-        "Stato",
-    ].iloc[0]
-
-    st.subheader(
-        f"{chosen} · {market} · {current_state}"
+    current_state = (
+        ranking.loc[
+            ranking["Coppia"]
+            == chosen,
+            "Stato",
+        ].iloc[0]
     )
 
-    st.write(explanation)
+    st.subheader(
+        f"{chosen} · "
+        f"{market} · "
+        f"{current_state}"
+    )
+
+    st.write(
+        explanation
+    )
 
     if plan:
         st.info(
-            f"Ingresso sopra {fmt(plan['entry'])} · "
-            f"Stop {fmt(plan['stop'])} "
-            f"({-plan['risk_pct']:.2f}%) · "
-            f"TP1 {fmt(plan['targets'][0])} "
-            f"({plan['net'][0]:+.2f}% netto) · "
-            f"TP2 {fmt(plan['targets'][1])} "
-            f"({plan['net'][1]:+.2f}% netto) · "
-            f"TP3 {fmt(plan['targets'][2])} "
-            f"({plan['net'][2]:+.2f}% netto)"
+            f"Ingresso sopra "
+            f"{fmt(plan['entry'])}"
+            " · Stop "
+            f"{fmt(plan['stop'])}"
+            " ("
+            f"{-plan['risk_pct']:.2f}%"
+            ") · TP1 "
+            f"{fmt(plan['targets'][0])}"
+            " ("
+            f"{plan['net'][0]:+.2f}%"
+            " netto) · TP2 "
+            f"{fmt(plan['targets'][1])}"
+            " ("
+            f"{plan['net'][1]:+.2f}%"
+            " netto) · TP3 "
+            f"{fmt(plan['targets'][2])}"
+            " ("
+            f"{plan['net'][2]:+.2f}%"
+            " netto)"
         )
 
-        if current_state != "TRIGGER LONG":
+        if (
+            current_state
+            != "TRIGGER LONG"
+        ):
             st.warning(
-                "Livelli di scenario: lo stato attuale "
-                f"è {current_state}. "
-                "L'ingresso non è confermato."
+                "Livelli di scenario: "
+                "ingresso non confermato. "
+                f"Stato: {current_state}"
             )
 
         st.caption(
-            "Distanza del trigger dal ticker: "
-            f"{plan['distance_pct']:+.2f}%. "
-            "TP a 1R/2R/3R. Rendimento stimato "
-            "dopo commissioni, senza slippage o funding."
+            "Distanza trigger "
+            "dal ticker: "
+            f"{plan['distance_pct']:+.2f}%"
+            ". Target a 1R/2R/3R, "
+            "al netto delle "
+            "commissioni stimate. "
+            "Slippage escluso."
         )
 
     st.caption(
-        f"Candela 15m usata: {candle_time} · "
-        "Dati scaricati: "
+        "Candela 15m usata: "
+        f"{candle_time}"
+        " · Dati scaricati: "
         f"{updated.strftime('%H:%M:%S UTC')}"
     )
 
     metric_rows = []
 
-    for timeframe in INTERVALS:
-        point = values[timeframe]
+    for timeframe in (
+        INTERVALS
+    ):
+        point = values[
+            timeframe
+        ]
 
         metric_rows.append(
             {
                 "TF": timeframe,
-                "Chiusura": fmt(
-                    point["close"]
-                ),
-                "RSI14": fmt(
-                    point["rsi"]
-                ),
+                "Chiusura":
+                    fmt(
+                        point["close"]
+                    ),
+                "RSI14":
+                    fmt(
+                        point["rsi"]
+                    ),
                 "Stoch K/D":
-                    f"{fmt(point['k'])} / "
+                    f"{fmt(point['k'])}"
+                    " / "
                     f"{fmt(point['d'])}",
                 "EMA7/25/99":
-                    f"{fmt(point['ema7'])} / "
-                    f"{fmt(point['ema25'])} / "
+                    f"{fmt(point['ema7'])}"
+                    " / "
+                    f"{fmt(point['ema25'])}"
+                    " / "
                     f"{fmt(point['ema99'])}",
-                "MACD hist": fmt(
-                    point["hist"]
-                ),
-                "Supertrend": fmt(
-                    point["supertrend"]
-                ),
-                "ATR10": fmt(
-                    point["atr"]
-                ),
-                "ADX14": fmt(
-                    point["adx"]
-                ),
+                "MACD hist":
+                    fmt(
+                        point["hist"]
+                    ),
+                "Supertrend":
+                    fmt(
+                        point[
+                            "supertrend"
+                        ]
+                    ),
+                "ATR10":
+                    fmt(
+                        point["atr"]
+                    ),
+                "ADX14":
+                    fmt(
+                        point["adx"]
+                    ),
                 "Bollinger L/U":
-                    f"{fmt(point['bb_lower'])} / "
+                    f"{fmt(point['bb_lower'])}"
+                    " / "
                     f"{fmt(point['bb_upper'])}",
-                "RVOL20": fmt(
-                    point["rvol"]
-                ),
-                "Delta taker %": fmt(
-                    point["taker_delta"]
-                ),
+                "RVOL20":
+                    fmt(
+                        point["rvol"]
+                    ),
+                "Delta taker %":
+                    fmt(
+                        point[
+                            "taker_delta"
+                        ]
+                    ),
             }
         )
 
     st.dataframe(
-        pd.DataFrame(metric_rows),
+        pd.DataFrame(
+            metric_rows
+        ),
         hide_index=True,
         use_container_width=True,
     )
 
     st.caption(
-        "Delta taker = "
-        "(2 × taker buy − volume totale) "
-        "/ volume totale. Misura gli scambi "
-        "aggressivi della candela, non i flussi "
-        "dei wallet o le liquidazioni."
+        "Delta taker: pressione "
+        "degli scambi aggressivi "
+        "nella candela. Non è "
+        "un dato sui wallet o "
+        "sulle liquidazioni."
     )
 
     with st.expander(
-        "Calcolatore rischio spot, senza leva"
+        "Calcolatore rischio "
+        "spot, senza leva"
     ):
         capital = st.number_input(
-            "Capitale in valuta quotata",
+            "Capitale in "
+            "valuta quotata",
             min_value=0.0,
             value=10000.0,
             step=500.0,
         )
 
-        risk_percent = st.number_input(
-            "Rischio massimo %",
-            min_value=0.1,
-            max_value=10.0,
-            value=1.0,
-            step=0.1,
+        risk_percent = (
+            st.number_input(
+                "Rischio massimo %",
+                min_value=0.1,
+                max_value=10.0,
+                value=1.0,
+                step=0.1,
+            )
         )
 
         current_price = float(
             ranking.loc[
-                ranking["Coppia"] == chosen,
+                ranking["Coppia"]
+                == chosen,
                 "Prezzo ticker",
             ].iloc[0]
         )
 
-        entry_price = st.number_input(
-            "Prezzo ingresso",
-            min_value=0.0,
-            value=current_price,
-            format="%.6f",
+        entry_price = (
+            st.number_input(
+                "Prezzo ingresso",
+                min_value=0.0,
+                value=current_price,
+                format="%.6f",
+            )
         )
 
-        stop_price = st.number_input(
-            "Prezzo stop",
-            min_value=0.0,
-            value=entry_price * 0.98,
-            format="%.6f",
+        stop_price = (
+            st.number_input(
+                "Prezzo stop",
+                min_value=0.0,
+                value=(
+                    entry_price
+                    * 0.98
+                ),
+                format="%.6f",
+            )
         )
 
         fee = st.number_input(
-            "Commissione % per lato",
+            "Commissione % "
+            "per lato",
             min_value=0.0,
             max_value=2.0,
             value=0.1,
@@ -1022,35 +1266,50 @@ def dashboard():
 
         if (
             entry_price > 0
-            and 0 < stop_price < entry_price
+            and 0 < stop_price
+            < entry_price
         ):
             loss_per_unit = (
                 entry_price
                 - stop_price
-                + entry_price * fee / 100
-                + stop_price * fee / 100
+                + (
+                    entry_price
+                    * fee / 100
+                )
+                + (
+                    stop_price
+                    * fee / 100
+                )
             )
 
             units = min(
-                capital / entry_price,
                 capital
-                * risk_percent
-                / 100
-                / loss_per_unit,
+                / entry_price,
+                (
+                    capital
+                    * risk_percent
+                    / 100
+                    / loss_per_unit
+                ),
             )
 
             st.info(
-                f"Quantità: {units:.6f} · "
-                f"Impiego: {units * entry_price:,.2f} · "
-                "Perdita stimata allo stop: "
-                f"{units * loss_per_unit:,.2f} "
-                "(commissioni incluse, "
-                "slippage escluso)"
+                "Quantità: "
+                f"{units:.6f}"
+                " · Impiego: "
+                f"{units * entry_price:,.2f}"
+                " · Perdita stimata "
+                "allo stop: "
+                f"{units * loss_per_unit:,.2f}"
+                " (commissioni "
+                "incluse; slippage "
+                "escluso)"
             )
         else:
             st.warning(
-                "Per un long spot inserisci "
-                "ingresso > stop > 0."
+                "Per un long spot "
+                "inserisci ingresso "
+                "> stop > 0."
             )
 
 
